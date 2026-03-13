@@ -1,0 +1,186 @@
+{
+  "domain": "jp-graduate-exam",
+  "sources": [
+    {
+      "id": "tokyo-university-IST",
+      "school_id": "tokyo-university",
+      "name": "東京大学 情報理工学系研究科",
+      "category": "admission",
+      "urls": {
+        "official": "https://www.i.u-tokyo.ac.jp/",
+        "admission": "https://www.i.u-tokyo.ac.jp/edu/entra/examinfo.shtml",
+        "past_exams": "https://www.i.u-tokyo.ac.jp/edu/entra/examarchive.shtml"
+      }
+    },
+    {
+      "id": "tokyo-university-engineering",
+      "school_id": "tokyo-university",
+      "name": "東京大学 工学系研究科",
+      "category": "admission",
+      "urls": {
+        "official": "https://www.t.u-tokyo.ac.jp/",
+        "admission": "https://www.t.u-tokyo.ac.jp/soae/admission/general-guidelines"
+      }
+    },
+    {
+      "id": "tokyo-university-frontier",
+      "school_id": "tokyo-university",
+      "name": "東京大学 新領域創成科学研究科",
+      "category": "admission",
+      "urls": {
+        "official": "https://www.k.u-tokyo.ac.jp/",
+        "admission": "https://www.k.u-tokyo.ac.jp/exam/"
+      }
+    },
+    {
+      "id": "tokyo-university-science",
+      "school_id": "tokyo-university",
+      "name": "東京大学 理学系研究科",
+      "category": "admission",
+      "urls": {
+        "official": "https://www.s.u-tokyo.ac.jp/",
+        "admission": "https://www.s.u-tokyo.ac.jp/ja/admission/"
+      }
+    },
+    {
+      "id": "kyoto-university-informatics",
+      "school_id": "kyoto-university",
+      "name": "京都大学 情報学研究科",
+      "category": "admission",
+      "urls": {
+        "official": "https://www.i.kyoto-u.ac.jp/",
+        "admission": "https://www.i.kyoto-u.ac.jp/admission/"
+      }
+    },
+    {
+      "id": "kyoto-university-science",
+      "school_id": "kyoto-university",
+      "name": "京都大学 理学研究科",
+      "category": "admission",
+      "urls": {
+        "official": "https://www.sci.kyoto-u.ac.jp/",
+        "admission": "https://www.sci.kyoto-u.ac.jp/ja/admission/"
+      }
+    },
+    {
+      "id": "osaka-university-IST",
+      "school_id": "osaka-university",
+      "name": "大阪大学 情報科学研究科",
+      "category": "admission",
+      "urls": {
+        "official": "https://www.ist.osaka-u.ac.jp/",
+        "admission": "https://www.ist.osaka-u.ac.jp/admission/"
+      }
+    },
+    {
+      "id": "tohoku-university-info-sci",
+      "school_id": "tohoku-university",
+      "name": "東北大学 情報科学研究科",
+      "category": "admission",
+      "urls": {
+        "official": "https://www.is.tohoku.ac.jp/",
+        "admission": "https://www.is.tohoku.ac.jp/admission/"
+      }
+    },
+    {
+      "id": "nagoya-university-informatics",
+      "school_id": "nagoya-university",
+      "name": "名古屋大学 情報学研究科",
+      "category": "admission",
+      "urls": {
+        "official": "https://www.i.nagoya-u.ac.jp/",
+        "admission": "https://www.i.nagoya-u.ac.jp/admission/"
+      }
+    },
+    {
+      "id": "TITech-MCS",
+      "school_id": "TITech",
+      "name": "東京科學大學(旧東京工業大学) 情報理工学院",
+      "category": "admission",
+      "urls": {
+        "official": "https://www.titech.ac.jp/",
+        "admission": "https://www.titech.ac.jp/admissions/prospective-students/admissions/guidelines"
+      }
+    },
+    {
+      "id": "hokkaido-university-IST",
+      "school_id": "hokkaido-university",
+      "name": "北海道大学 情報科学院",
+      "category": "admission",
+      "urls": {
+        "official": "https://www.ist.hokudai.ac.jp/",
+        "admission": "https://www.ist.hokudai.ac.jp/exam/"
+      }
+    },
+    {
+      "id": "kyushu-university-ISEE",
+      "school_id": "kyushu-university",
+      "name": "九州大学 システム情報科学府",
+      "category": "admission",
+      "urls": {
+        "official": "https://www.isee.kyushu-u.ac.jp/",
+        "admission": "https://www.isee.kyushu-u.ac.jp/e_admission.html"
+      }
+    },
+    {
+      "id": "tsukuba-university-sie",
+      "school_id": "tsukuba-university",
+      "name": "筑波大学 理工情報生命学術院",
+      "category": "admission",
+      "urls": {
+        "official": "https://www.sie.tsukuba.ac.jp/",
+        "admission": "https://www.sie.tsukuba.ac.jp/admission/"
+      }
+    },
+    {
+      "id": "waseda-university-FSE",
+      "school_id": "waseda-university",
+      "name": "早稲田大学 基幹理工学研究科",
+      "category": "admission",
+      "urls": {
+        "official": "https://www.waseda.jp/fsci/gse/",
+        "admission": "https://www.waseda.jp/fsci/gse/applicants/admission/"
+      }
+    },
+    {
+      "id": "keio-university",
+      "school_id": "keio-university",
+      "name": "慶應義塾大学",
+      "category": "admission",
+      "urls": {
+        "official": "https://www.keio.ac.jp/",
+        "admission": "https://www.keio.ac.jp/ja/admissions/graduate/"
+      }
+    },
+    {
+      "id": "jasso",
+      "school_id": null,
+      "name": "JASSO (日本学生支援機構)",
+      "category": "general",
+      "urls": {
+        "official": "https://www.jasso.go.jp/",
+        "scholarship": "https://www.jasso.go.jp/ryugaku/scholarship/",
+        "study_in_japan": "https://www.studyinjapan.go.jp/"
+      }
+    },
+    {
+      "id": "jlpt",
+      "school_id": null,
+      "name": "JLPT (日本語能力試験)",
+      "category": "general",
+      "urls": {
+        "official": "https://www.jlpt.jp/",
+        "schedule": "https://www.jlpt.jp/schedule/"
+      }
+    },
+    {
+      "id": "ejuken",
+      "school_id": null,
+      "name": "EJU (日本留学試験)",
+      "category": "general",
+      "urls": {
+        "official": "https://www.jasso.go.jp/ryugaku/eju/"
+      }
+    }
+  ]
+}

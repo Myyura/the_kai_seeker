@@ -1,0 +1,83 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+*.sqlite3
+
+# User extensions (keep README and examples)
+backend/user_extensions/tools/*.py
+backend/user_extensions/skills/*.md
+!backend/user_extensions/tools/_example_tool.py
+!backend/user_extensions/skills/_example_skill.md
+
+# ChromaDB / Vector DB local data
+backend/data/chroma/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node / Frontend
+.eslintcache
+*.tsbuildinfo
+node_modules/
+frontend/out/
+frontend/.next/
+frontend/next-env.d.ts
+
+# Local AI Models & Weights (如果涉及本地模型)
+*.gguf
+*.bin
+*.safetensors
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Coverage
+htmlcov/
+.coverage
+.coverage.*
+coverage/
+
+# pytest
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+
+# Linters / Formatters
+.ruff_cache/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/

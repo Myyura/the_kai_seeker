@@ -1,0 +1,859 @@
+[
+  {
+    "id": "TITech",
+    "name_ja": "東京科學大學 旧・東京工業大学",
+    "departments": [
+      {
+        "id": "MCS",
+        "name_ja": "情報理工学院",
+        "programs": [
+          {
+            "id": "cs",
+            "name_ja": "情報工学系"
+          },
+          {
+            "id": "is",
+            "name_ja": "数理・計算科学系"
+          }
+        ]
+      },
+      {
+        "id": "MCT",
+        "name_ja": "物質理工学院",
+        "programs": [
+          {
+            "id": "mat",
+            "name_ja": "材料系"
+          }
+        ]
+      },
+      {
+        "id": "engineering",
+        "name_ja": "工学院",
+        "programs": [
+          {
+            "id": "ee",
+            "name_ja": "電気電子系"
+          },
+          {
+            "id": "ict",
+            "name_ja": "情報通信系"
+          },
+          {
+            "id": "iee",
+            "name_ja": "経営工学系"
+          },
+          {
+            "id": "mech",
+            "name_ja": "機械系"
+          },
+          {
+            "id": "sc",
+            "name_ja": "システム制御系"
+          }
+        ]
+      },
+      {
+        "id": "environment_and_society",
+        "name_ja": "環境・社会理工学院",
+        "programs": [
+          {
+            "id": "cv",
+            "name_ja": "土木・環境工学系"
+          },
+          {
+            "id": "tse",
+            "name_ja": "融合理工学系"
+          }
+        ]
+      },
+      {
+        "id": "science",
+        "name_ja": "理学院",
+        "programs": [
+          {
+            "id": "earth",
+            "name_ja": "地球惑星科学系"
+          },
+          {
+            "id": "math",
+            "name_ja": "数学系"
+          },
+          {
+            "id": "phys",
+            "name_ja": "物理学系"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "TUAT",
+    "name_ja": "東京農工大学",
+    "departments": [
+      {
+        "id": "engineering",
+        "name_ja": "工学府",
+        "programs": [
+          {
+            "id": "kyotsu",
+            "name_ja": "共通数学"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "UEC",
+    "name_ja": "電気通信大学",
+    "departments": [
+      {
+        "id": "informatics_and_engineering",
+        "name_ja": "情報理工学研究科",
+        "programs": [
+          {
+            "id": "cne",
+            "name_ja": "情報・ネットワーク工学専攻"
+          },
+          {
+            "id": "is",
+            "name_ja": "情報学専攻"
+          },
+          {
+            "id": "mise",
+            "name_ja": "機械知能システム学専攻"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hiroshima-university",
+    "name_ja": "広島大学",
+    "departments": [
+      {
+        "id": "ASE",
+        "name_ja": "先進理工系科学研究科",
+        "programs": [
+          {
+            "id": "esce",
+            "name_ja": "電気システム制御プログラム"
+          },
+          {
+            "id": "is",
+            "name_ja": "情報科学プログラム"
+          },
+          {
+            "id": "math",
+            "name_ja": "数学プログラム"
+          },
+          {
+            "id": "phys",
+            "name_ja": "物理学プログラム"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hokkaido-university",
+    "name_ja": "北海道大学",
+    "departments": [
+      {
+        "id": "IST",
+        "name_ja": "情報科学院",
+        "programs": [
+          {
+            "id": "csit",
+            "name_ja": "情報科学専攻 情報理工学コース"
+          },
+          {
+            "id": "joele",
+            "name_ja": "情報科学専攻 情報エレクトロニクスコース"
+          },
+          {
+            "id": "mn",
+            "name_ja": "情報科学専攻 メディアネットワークコース"
+          },
+          {
+            "id": "seitai",
+            "name_ja": "情報科学専攻 生体情報工学コース"
+          },
+          {
+            "id": "sys",
+            "name_ja": "情報科学専攻 システム情報科学コース"
+          }
+        ]
+      },
+      {
+        "id": "fisheries_sciences",
+        "name_ja": "水産科学院 海洋生物資源科学専攻",
+        "programs": []
+      },
+      {
+        "id": "public_policy",
+        "name_ja": "公共政策大学院",
+        "programs": []
+      },
+      {
+        "id": "science",
+        "name_ja": "理学院",
+        "programs": [
+          {
+            "id": "phys",
+            "name_ja": "物性物理学専攻・宇宙理学専攻"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "kanazawa-university",
+    "name_ja": "金沢大学",
+    "departments": [
+      {
+        "id": "nst",
+        "name_ja": "自然科学研究科",
+        "programs": [
+          {
+            "id": "eice",
+            "name_ja": "電子情報通信学専攻"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "keio-university",
+    "name_ja": "慶應義塾大学",
+    "departments": [
+      {
+        "id": "business",
+        "name_ja": "経営管理研究科",
+        "programs": []
+      }
+    ]
+  },
+  {
+    "id": "kobe-university",
+    "name_ja": "神戸大学",
+    "departments": [
+      {
+        "id": "economics",
+        "name_ja": "経済学研究科",
+        "programs": []
+      },
+      {
+        "id": "engineering",
+        "name_ja": "工学研究科",
+        "programs": [
+          {
+            "id": "ee",
+            "name_ja": "電気電子工学専攻"
+          },
+          {
+            "id": "shimin",
+            "name_ja": "市民工学専攻"
+          }
+        ]
+      },
+      {
+        "id": "science",
+        "name_ja": "理学研究科",
+        "programs": [
+          {
+            "id": "chem",
+            "name_ja": "化学専攻"
+          },
+          {
+            "id": "math",
+            "name_ja": "数学専攻"
+          },
+          {
+            "id": "phys",
+            "name_ja": "物理学専攻"
+          }
+        ]
+      },
+      {
+        "id": "system_informatics",
+        "name_ja": "システム情報学研究科",
+        "programs": []
+      }
+    ]
+  },
+  {
+    "id": "kyoto-university",
+    "name_ja": "京都大学",
+    "departments": [
+      {
+        "id": "informatics",
+        "name_ja": "情報学研究科",
+        "programs": [
+          {
+            "id": "amp",
+            "name_ja": "数理工学専攻"
+          },
+          {
+            "id": "ams",
+            "name_ja": "先端数理科学専攻"
+          },
+          {
+            "id": "cce",
+            "name_ja": "通信情報システム専攻"
+          },
+          {
+            "id": "ist",
+            "name_ja": "知能情報学専攻"
+          },
+          {
+            "id": "sys",
+            "name_ja": "システム科学専攻"
+          }
+        ]
+      },
+      {
+        "id": "management",
+        "name_ja": "経営管理大学院",
+        "programs": []
+      },
+      {
+        "id": "science",
+        "name_ja": "理学研究科",
+        "programs": [
+          {
+            "id": "chem",
+            "name_ja": "化学専攻"
+          },
+          {
+            "id": "eps",
+            "name_ja": "地球惑星科学専攻"
+          },
+          {
+            "id": "math",
+            "name_ja": "数学・数理解析専攻"
+          },
+          {
+            "id": "phys",
+            "name_ja": "物理学・宇宙物理学専攻"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "kyushu-university",
+    "name_ja": "九州大学",
+    "departments": [
+      {
+        "id": "ISEE",
+        "name_ja": "システム情報科学府",
+        "programs": [
+          {
+            "id": "ist",
+            "name_ja": "情報理工学専攻"
+          },
+          {
+            "id": "kyotsu",
+            "name_ja": "共通"
+          }
+        ]
+      },
+      {
+        "id": "economics",
+        "name_ja": "経済学府 経済工学専攻",
+        "programs": []
+      },
+      {
+        "id": "engineering",
+        "name_ja": "工学府",
+        "programs": [
+          {
+            "id": "ac",
+            "name_ja": "応用化学専攻"
+          },
+          {
+            "id": "civil",
+            "name_ja": "土木工学専攻"
+          },
+          {
+            "id": "mech",
+            "name_ja": "機械系専攻"
+          },
+          {
+            "id": "nams",
+            "name_ja": "船舶海洋工学専攻"
+          },
+          {
+            "id": "qpn",
+            "name_ja": "量子物理工学専攻"
+          }
+        ]
+      },
+      {
+        "id": "mathematics",
+        "name_ja": "数理学府",
+        "programs": [
+          {
+            "id": "mma",
+            "name_ja": "MMAコース"
+          },
+          {
+            "id": "suuri",
+            "name_ja": "数理学コース"
+          }
+        ]
+      },
+      {
+        "id": "science",
+        "name_ja": "理学府",
+        "programs": [
+          {
+            "id": "geo",
+            "name_ja": "地球惑星科学専攻"
+          },
+          {
+            "id": "phys",
+            "name_ja": "物理学専攻"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "nagoya-university",
+    "name_ja": "名古屋大学",
+    "departments": [
+      {
+        "id": "EES",
+        "name_ja": "環境学研究科",
+        "programs": [
+          {
+            "id": "eps",
+            "name_ja": "地球環境科学専攻"
+          }
+        ]
+      },
+      {
+        "id": "engineering",
+        "name_ja": "工学研究科",
+        "programs": [
+          {
+            "id": "mae",
+            "name_ja": "機械航空系"
+          },
+          {
+            "id": "nuee",
+            "name_ja": "電気電子情報工学科"
+          }
+        ]
+      },
+      {
+        "id": "informatics",
+        "name_ja": "情報学研究科",
+        "programs": [
+          {
+            "id": "aisys",
+            "name_ja": "知能システム学専攻"
+          },
+          {
+            "id": "complex",
+            "name_ja": "複雑系科学専攻"
+          },
+          {
+            "id": "is",
+            "name_ja": "情報システム学専攻"
+          },
+          {
+            "id": "mi",
+            "name_ja": "数理情報学専攻"
+          }
+        ]
+      },
+      {
+        "id": "mathematics",
+        "name_ja": "多元数理科学研究科",
+        "programs": []
+      },
+      {
+        "id": "science",
+        "name_ja": "理学研究科",
+        "programs": [
+          {
+            "id": "chem",
+            "name_ja": "化学講座 (理学専攻 物質・生命化学領域)"
+          },
+          {
+            "id": "phys",
+            "name_ja": "物理学教室 (理学専攻 物質科学領域)"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "osaka-university",
+    "name_ja": "大阪大学",
+    "departments": [
+      {
+        "id": "IST",
+        "name_ja": "情報科学研究科",
+        "programs": [
+          {
+            "id": "IPS",
+            "name_ja": "情報数理学専攻"
+          },
+          {
+            "id": "ie",
+            "name_ja": "情報工学"
+          },
+          {
+            "id": "math",
+            "name_ja": "情報基礎数学専攻"
+          }
+        ]
+      },
+      {
+        "id": "engineering",
+        "name_ja": "工学研究科",
+        "programs": [
+          {
+            "id": "eei",
+            "name_ja": "電気電子情報工学専攻"
+          },
+          {
+            "id": "see",
+            "name_ja": "環境・エネルギー工学科"
+          }
+        ]
+      },
+      {
+        "id": "engineering_sciences",
+        "name_ja": "基礎工学研究科",
+        "programs": [
+          {
+            "id": "bio",
+            "name_ja": "生体システム工学"
+          },
+          {
+            "id": "ee",
+            "name_ja": "電子光科学 (システム創成専攻)"
+          },
+          {
+            "id": "me",
+            "name_ja": "機械科学 (機能創成専攻)"
+          },
+          {
+            "id": "sigmath",
+            "name_ja": "数理科学 (システム創成専攻)"
+          },
+          {
+            "id": "sys",
+            "name_ja": "知能システム学"
+          }
+        ]
+      },
+      {
+        "id": "science",
+        "name_ja": "理学研究科",
+        "programs": [
+          {
+            "id": "phys",
+            "name_ja": "物理学専攻"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "tohoku-university",
+    "name_ja": "東北大学",
+    "departments": [
+      {
+        "id": "biomedical_engineering",
+        "name_ja": "医工学研究科",
+        "programs": []
+      },
+      {
+        "id": "engineering",
+        "name_ja": "工学研究科",
+        "programs": [
+          {
+            "id": "apph",
+            "name_ja": "応用物理学専攻"
+          },
+          {
+            "id": "che",
+            "name_ja": "化学・バイオ系"
+          },
+          {
+            "id": "civil",
+            "name_ja": "土木工学専攻"
+          },
+          {
+            "id": "ecei",
+            "name_ja": "電気・情報系"
+          },
+          {
+            "id": "material",
+            "name_ja": "マテリアル・開発系"
+          },
+          {
+            "id": "mech",
+            "name_ja": "機械系"
+          },
+          {
+            "id": "qse",
+            "name_ja": "量子エネルギー工学専攻"
+          }
+        ]
+      },
+      {
+        "id": "environmental_studies",
+        "name_ja": "環境科学研究科",
+        "programs": [
+          {
+            "id": "ee",
+            "name_ja": "エネルギー環境群"
+          }
+        ]
+      },
+      {
+        "id": "information_sciences",
+        "name_ja": "情報科学研究科",
+        "programs": [
+          {
+            "id": "math",
+            "name_ja": "数学教室"
+          },
+          {
+            "id": "social",
+            "name_ja": "社会科学群"
+          }
+        ]
+      },
+      {
+        "id": "science",
+        "name_ja": "理学研究科",
+        "programs": [
+          {
+            "id": "chem",
+            "name_ja": "化学専攻"
+          },
+          {
+            "id": "gp",
+            "name_ja": "地球物理学専攻"
+          },
+          {
+            "id": "math",
+            "name_ja": "数学専攻"
+          },
+          {
+            "id": "phys",
+            "name_ja": "物理学専攻"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "tokyo-university",
+    "name_ja": "東京大学",
+    "departments": [
+      {
+        "id": "III",
+        "name_ja": "学際情報学府",
+        "programs": [
+          {
+            "id": "biostat_bioinfo",
+            "name_ja": "学際情報学専攻 生物統計情報学コース"
+          }
+        ]
+      },
+      {
+        "id": "IST",
+        "name_ja": "情報理工学系研究科",
+        "programs": [
+          {
+            "id": "ci",
+            "name_ja": "創造情報学専攻"
+          },
+          {
+            "id": "cs",
+            "name_ja": "コンピュータ科学専攻"
+          },
+          {
+            "id": "denshi",
+            "name_ja": "電子情報学専攻"
+          },
+          {
+            "id": "kyotsu",
+            "name_ja": "共通科目"
+          },
+          {
+            "id": "suuri",
+            "name_ja": "数理情報学"
+          }
+        ]
+      },
+      {
+        "id": "art_and_sciences",
+        "name_ja": "総合文化研究科",
+        "programs": [
+          {
+            "id": "system",
+            "name_ja": "広域科学専攻"
+          }
+        ]
+      },
+      {
+        "id": "engineering",
+        "name_ja": "工学系研究科",
+        "programs": [
+          {
+            "id": "ap",
+            "name_ja": "物理工学専攻"
+          },
+          {
+            "id": "eeis",
+            "name_ja": "電気系工学専攻"
+          },
+          {
+            "id": "kyotsu",
+            "name_ja": "共通"
+          },
+          {
+            "id": "mech",
+            "name_ja": "機械工学専攻"
+          },
+          {
+            "id": "tmi",
+            "name_ja": "技術経営戦略学専攻"
+          }
+        ]
+      },
+      {
+        "id": "frontier_sciences",
+        "name_ja": "新領域創成科学研究科",
+        "programs": [
+          {
+            "id": "cbms",
+            "name_ja": "メディカル情報生命専攻"
+          },
+          {
+            "id": "cse",
+            "name_ja": "複雑理工学専攻"
+          },
+          {
+            "id": "materials",
+            "name_ja": "物質系専攻"
+          },
+          {
+            "id": "otpe",
+            "name_ja": "海洋技術環境学専攻"
+          }
+        ]
+      },
+      {
+        "id": "mathematical_sciences",
+        "name_ja": "数理科学研究科",
+        "programs": [
+          {
+            "id": "ms",
+            "name_ja": "数理科学専攻"
+          }
+        ]
+      },
+      {
+        "id": "science",
+        "name_ja": "理学系研究科",
+        "programs": [
+          {
+            "id": "astron",
+            "name_ja": "天文学専攻"
+          },
+          {
+            "id": "chem",
+            "name_ja": "化学専攻"
+          },
+          {
+            "id": "phys",
+            "name_ja": "物理学専攻"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "tsukuba-university",
+    "name_ja": "筑波大学",
+    "departments": [
+      {
+        "id": "science_and_technology",
+        "name_ja": "理工情報生命学術院",
+        "programs": [
+          {
+            "id": "pas",
+            "name_ja": "数理物質科学研究群"
+          },
+          {
+            "id": "sie",
+            "name_ja": "システム情報工学研究群"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "waseda-university",
+    "name_ja": "早稲田大学",
+    "departments": [
+      {
+        "id": "ASE",
+        "name_ja": "先進理工学研究科",
+        "programs": [
+          {
+            "id": "butsuri",
+            "name_ja": "物理学及応用物理学専攻"
+          },
+          {
+            "id": "kyodogenshi",
+            "name_ja": "共同原子力専攻"
+          }
+        ]
+      },
+      {
+        "id": "CSE",
+        "name_ja": "創造理工学研究科",
+        "programs": [
+          {
+            "id": "keieisystem",
+            "name_ja": "経営システム工学専攻"
+          }
+        ]
+      },
+      {
+        "id": "FSE",
+        "name_ja": "基幹理工学研究科",
+        "programs": [
+          {
+            "id": "denshibutsuri",
+            "name_ja": "電子物理システム学専攻"
+          },
+          {
+            "id": "kikaikagaku",
+            "name_ja": "機械科学・航空宇宙専攻"
+          },
+          {
+            "id": "sugaku",
+            "name_ja": "数学応用数理専攻"
+          },
+          {
+            "id": "zairyokagaku",
+            "name_ja": "材料科学専攻"
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -1,0 +1,44 @@
+from datetime import datetime
+
+from pydantic import BaseModel
+
+
+class ChatMessageIn(BaseModel):
+    role: str = "user"
+    content: str
+
+
+class ChatRequest(BaseModel):
+    session_id: int | None = None
+    messages: list[ChatMessageIn]
+    stream: bool = False
+
+
+class ChatResponseOut(BaseModel):
+    session_id: int
+    role: str = "assistant"
+    content: str
+    model: str | None = None
+
+
+class ChatMessageOut(BaseModel):
+    id: int
+    role: str
+    content: str
+    model: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ChatSessionOut(BaseModel):
+    id: int
+    title: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ChatSessionDetail(ChatSessionOut):
+    messages: list[ChatMessageOut]

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ChatMessageIn(BaseModel):
@@ -11,6 +11,7 @@ class ChatMessageIn(BaseModel):
 class ChatRequest(BaseModel):
     session_id: int | None = None
     messages: list[ChatMessageIn]
+    pdf_ids: list[int] = Field(default_factory=list)
     stream: bool = False
 
 

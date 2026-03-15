@@ -29,6 +29,12 @@ interface SessionDetail {
   messages: { id: number; role: string; content: string }[];
 }
 
+interface UploadedPdf {
+  pdf_id: number;
+  filename: string;
+  status: string;
+}
+
 export default function ChatPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
@@ -36,8 +42,10 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploadedPdfs, setUploadedPdfs] = useState<UploadedPdf[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -79,8 +87,42 @@ export default function ChatPage() {
   function handleNewChat() {
     setActiveSessionId(null);
     setMessages([]);
+    setUploadedPdfs([]);
     setError(null);
     inputRef.current?.focus();
+  }
+
+  async function handlePdfUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type !== "application/pdf") {
+      setError("Only PDF files are supported");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await fetch(`${config.apiBaseUrl}/files/upload`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.detail || `Error ${res.status}`);
+      }
+      const data = (await res.json()) as UploadedPdf;
+      setUploadedPdfs((prev) => [...prev, data]);
+      setError(null);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to upload PDF";
+      setError(msg);
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
   }
 
   async function handleDeleteSession(id: number) {
@@ -118,6 +160,7 @@ export default function ChatPage() {
             role: m.role,
             content: m.content,
           })),
+          pdf_ids: uploadedPdfs.map((p) => p.pdf_id),
           stream: true,
         }),
       });
@@ -358,6 +401,40 @@ export default function ChatPage() {
         )}
 
         <form onSubmit={handleSubmit} className={styles.inputArea}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf"
+            className={styles.hiddenFileInput}
+            onChange={handlePdfUpload}
+          />
+          <button
+            type="button"
+            className={styles.uploadBtn}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={streaming}
+          >
+            Upload PDF
+          </button>
+          {uploadedPdfs.length > 0 && (
+            <div className={styles.pdfChipList}>
+              {uploadedPdfs.map((pdf) => (
+                <div key={pdf.pdf_id} className={styles.pdfChip}>
+                  <span>{pdf.filename}</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setUploadedPdfs((prev) =>
+                        prev.filter((item) => item.pdf_id !== pdf.pdf_id)
+                      )
+                    }
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <textarea
             ref={inputRef}
             className={styles.textarea}

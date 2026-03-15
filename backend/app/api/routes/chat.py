@@ -29,7 +29,7 @@ async def send_message(
 
     if req.stream:
         try:
-            token_iter, sid = await service.chat_stream(req.messages, req.session_id)
+            token_iter, sid = await service.chat_stream(req.messages, req.session_id, req.pdf_ids)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
@@ -40,7 +40,7 @@ async def send_message(
         )
 
     try:
-        content, model, sid = await service.chat(req.messages, req.session_id)
+        content, model, sid = await service.chat(req.messages, req.session_id, req.pdf_ids)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception:

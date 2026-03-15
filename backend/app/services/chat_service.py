@@ -16,6 +16,7 @@ from app.repositories.conversation_repo import ConversationRepository
 from app.repositories.provider_repo import ProviderRepository
 from app.schemas.chat import ChatMessageIn
 from app.services.agent import build_system_prompt, run_agent_loop
+from app.services.request_context import set_active_pdf_ids
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +35,15 @@ class ChatService:
             raise ValueError("No active LLM provider configured. Please add one in Settings.")
         return create_provider(setting)
 
-    def _build_messages(self, user_messages: list[ChatMessageIn]) -> list[ChatMessage]:
+    def _build_messages(self, user_messages: list[ChatMessageIn], pdf_ids: list[int] | None = None) -> list[ChatMessage]:
         last_user_text = user_messages[-1].content if user_messages else ""
         system_prompt = build_system_prompt(user_message=last_user_text)
+        if pdf_ids:
+            system_prompt += (
+                "\n\n## Active Uploaded PDFs\n"
+                f"Use these pdf_ids when calling PDF tools: {pdf_ids}. "
+                "If the user asks about the uploaded document and does not specify one, use the first id."
+            )
         messages = [ChatMessage(role="system", content=system_prompt)]
         for m in user_messages:
             messages.append(ChatMessage(role=m.role, content=m.content))
@@ -55,7 +62,10 @@ class ChatService:
         return chat_session.id
 
     async def chat(
-        self, user_messages: list[ChatMessageIn], session_id: int | None = None
+        self,
+        user_messages: list[ChatMessageIn],
+        session_id: int | None = None,
+        pdf_ids: list[int] | None = None,
     ) -> tuple[str, str | None, int, list[dict]]:
         """Returns (content, model_name, session_id, tool_call_log)."""
         sid = await self._ensure_session(
@@ -67,16 +77,20 @@ class ChatService:
             await self.conversation_repo.add_message(sid, last_user_msg.role, last_user_msg.content)
 
         provider = await self._get_provider()
-        messages = self._build_messages(user_messages)
+        messages = self._build_messages(user_messages, pdf_ids=pdf_ids)
 
-        final_answer, tool_call_log = await run_agent_loop(provider, messages)
+        with set_active_pdf_ids(pdf_ids or []):
+            final_answer, tool_call_log = await run_agent_loop(provider, messages)
 
         await self.conversation_repo.add_message(sid, "assistant", final_answer)
 
         return final_answer, provider.model, sid, tool_call_log
 
     async def chat_stream(
-        self, user_messages: list[ChatMessageIn], session_id: int | None = None
+        self,
+        user_messages: list[ChatMessageIn],
+        session_id: int | None = None,
+        pdf_ids: list[int] | None = None,
     ) -> tuple[AsyncIterator[dict], int]:
         """Returns (event_iterator, session_id).
 
@@ -94,7 +108,7 @@ class ChatService:
             await self.conversation_repo.add_message(sid, last_user_msg.role, last_user_msg.content)
 
         provider = await self._get_provider()
-        messages = self._build_messages(user_messages)
+        messages = self._build_messages(user_messages, pdf_ids=pdf_ids)
 
         async def _generate() -> AsyncIterator[dict]:
             tool_events: list[dict] = []
@@ -103,9 +117,10 @@ class ChatService:
                 tool_events.append({"tool_call": name, "args": args})
                 tool_events.append({"tool_result": name, "result": result[:500]})
 
-            final_answer, _ = await run_agent_loop(
-                provider, messages, on_tool_call=on_tool_call
-            )
+            with set_active_pdf_ids(pdf_ids or []):
+                final_answer, _ = await run_agent_loop(
+                    provider, messages, on_tool_call=on_tool_call
+                )
 
             for event in tool_events:
                 yield event

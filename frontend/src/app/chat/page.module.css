@@ -302,11 +302,54 @@
 /* Input area */
 .inputArea {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: flex-end;
   padding-top: 12px;
   border-top: 1px solid var(--card-border);
   flex-shrink: 0;
+}
+
+.hiddenFileInput {
+  display: none;
+}
+
+.uploadBtn {
+  flex-shrink: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-xs);
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  background: var(--card-bg);
+}
+
+.uploadBtn:disabled {
+  opacity: 0.5;
+}
+
+.pdfChipList {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pdfChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+}
+
+.pdfChip button {
+  color: var(--color-text-muted);
+  font-size: 12px;
 }
 
 .textarea {

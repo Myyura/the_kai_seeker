@@ -43,6 +43,7 @@ export default function ChatPage() {
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploadedPdfs, setUploadedPdfs] = useState<UploadedPdf[]>([]);
+  const [dragOver, setDragOver] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -92,14 +93,40 @@ export default function ChatPage() {
     inputRef.current?.focus();
   }
 
+  const uploadPdfFile = useCallback(
+    async (file: File) => {
+      if (file.type !== "application/pdf") {
+        setError("Only PDF files are supported");
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        const res = await fetch(`${config.apiBaseUrl}/files/upload`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.detail || `Error ${res.status}`);
+        }
+        const data = (await res.json()) as UploadedPdf;
+        setUploadedPdfs((prev) => [...prev, data]);
+        setError(null);
+      } catch (err) {
+        const msg =
+          err instanceof Error ? err.message : "Failed to upload PDF";
+        setError(msg);
+      }
+    },
+    []
+  );
+
   async function handlePdfUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.type !== "application/pdf") {
-      setError("Only PDF files are supported");
-      return;
-    }
-
     const formData = new FormData();
     formData.append("file", file);
 
@@ -310,7 +337,24 @@ export default function ChatPage() {
       </aside>
 
       {/* Main chat area */}
-      <div className={styles.chatMain}>
+      <div
+        className={`${styles.chatMain} ${dragOver ? styles.chatMainDragOver : ""}`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+        }}
+        onDrop={async (e) => {
+          e.preventDefault();
+          setDragOver(false);
+          const file = e.dataTransfer.files?.[0];
+          if (!file) return;
+          await uploadPdfFile(file);
+        }}
+      >
         <div className={styles.header}>
           <h1 className={styles.heading}>Study Chat</h1>
         </div>

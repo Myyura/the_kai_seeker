@@ -104,6 +104,12 @@
   max-width: 800px;
 }
 
+.chatMainDragOver {
+  border: 2px dashed var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: rgba(46, 133, 85, 0.04);
+}
+
 .header {
   display: flex;
   align-items: center;

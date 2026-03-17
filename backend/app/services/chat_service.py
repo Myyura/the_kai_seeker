@@ -61,6 +61,28 @@ class ChatService:
         chat_session = await self.conversation_repo.create_session(title=title)
         return chat_session.id
 
+    async def _attach_initial_pdf_ids(self, session_id: int, pdf_ids: list[int] | None) -> None:
+        for pid in pdf_ids or []:
+            await self.conversation_repo.attach_pdf_resource(
+                session_id,
+                pid,
+                source_type="uploaded",
+            )
+
+    async def _attach_fetched_pdfs_from_log(self, session_id: int, tool_call_log: list[dict]) -> None:
+        for log in tool_call_log:
+            if log.get("tool") != "fetch_pdf_and_upload":
+                continue
+            fetched = self._parse_fetch_pdf_tool_result(log.get("result", ""))
+            if not fetched:
+                continue
+            await self.conversation_repo.attach_pdf_resource(
+                session_id,
+                fetched["pdf_id"],
+                source_type="fetched",
+                source_url=fetched.get("source_url"),
+            )
+
     async def chat(
         self,
         user_messages: list[ChatMessageIn],
@@ -76,12 +98,15 @@ class ChatService:
         if last_user_msg:
             await self.conversation_repo.add_message(sid, last_user_msg.role, last_user_msg.content)
 
+        await self._attach_initial_pdf_ids(sid, pdf_ids)
+
         provider = await self._get_provider()
         messages = self._build_messages(user_messages, pdf_ids=pdf_ids)
 
         with set_active_pdf_ids(pdf_ids or []):
             final_answer, tool_call_log = await run_agent_loop(provider, messages)
 
+        await self._attach_fetched_pdfs_from_log(sid, tool_call_log)
         await self.conversation_repo.add_message(sid, "assistant", final_answer)
 
         return final_answer, provider.model, sid, tool_call_log
@@ -107,20 +132,22 @@ class ChatService:
         if last_user_msg:
             await self.conversation_repo.add_message(sid, last_user_msg.role, last_user_msg.content)
 
+        await self._attach_initial_pdf_ids(sid, pdf_ids)
+
         provider = await self._get_provider()
         messages = self._build_messages(user_messages, pdf_ids=pdf_ids)
 
         async def _generate() -> AsyncIterator[dict]:
             tool_events: list[dict] = []
+            fetched_pdf_entries: list[dict] = []
 
             async def on_tool_call(name: str, args: dict, result: str) -> None:
                 tool_events.append({"tool_call": name, "args": args})
-                # For most tools we truncate the textual result for streaming,
-                # but some tools (like fetch_pdf_and_upload) return compact JSON
-                # that the frontend needs to parse in full. In those cases,
-                # avoid truncation so the JSON stays valid.
                 if name == "fetch_pdf_and_upload":
                     trimmed_result = result
+                    fetched = self._parse_fetch_pdf_tool_result(result)
+                    if fetched:
+                        fetched_pdf_entries.append(fetched)
                 else:
                     trimmed_result = result[:500]
                 tool_events.append({"tool_result": name, "result": trimmed_result})
@@ -128,6 +155,14 @@ class ChatService:
             with set_active_pdf_ids(pdf_ids or []):
                 final_answer, _ = await run_agent_loop(
                     provider, messages, on_tool_call=on_tool_call
+                )
+
+            for fetched in fetched_pdf_entries:
+                await self.conversation_repo.attach_pdf_resource(
+                    sid,
+                    fetched["pdf_id"],
+                    source_type="fetched",
+                    source_url=fetched.get("source_url"),
                 )
 
             for event in tool_events:
@@ -139,6 +174,19 @@ class ChatService:
                 yield {"token": chunk}
 
         return _generate(), sid
+
+    @staticmethod
+    def _parse_fetch_pdf_tool_result(result: str) -> dict | None:
+        try:
+            payload = json.loads(result)
+        except Exception:
+            return None
+
+        pdf_id = payload.get("pdf_id")
+        if not isinstance(pdf_id, int):
+            return None
+        source_url = payload.get("source_url")
+        return {"pdf_id": pdf_id, "source_url": source_url}
 
 
 def _chunk_text(text: str, size: int) -> list[str]:

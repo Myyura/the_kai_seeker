@@ -29,10 +29,12 @@ interface SessionDetail {
   messages: { id: number; role: string; content: string }[];
 }
 
-interface UploadedPdf {
+interface PdfResource {
   pdf_id: number;
   filename: string;
   status: string;
+  source: "uploaded" | "fetched";
+  source_url?: string | null;
 }
 
 export default function ChatPage() {
@@ -42,7 +44,7 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [uploadedPdfs, setUploadedPdfs] = useState<UploadedPdf[]>([]);
+  const [pdfResources, setPdfResources] = useState<PdfResource[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -50,6 +52,16 @@ export default function ChatPage() {
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
+  const upsertPdfResource = useCallback((resource: PdfResource) => {
+    setPdfResources((prev) => {
+      const exists = prev.find((item) => item.pdf_id === resource.pdf_id);
+      if (!exists) return [...prev, resource];
+      return prev.map((item) =>
+        item.pdf_id === resource.pdf_id ? { ...item, ...resource } : item
+      );
+    });
   }, []);
 
   useEffect(() => {
@@ -71,7 +83,10 @@ export default function ChatPage() {
 
   async function loadSession(sessionId: number) {
     try {
-      const detail = await api.get<SessionDetail>(`/chat/sessions/${sessionId}`);
+      const [detail, resources] = await Promise.all([
+        api.get<SessionDetail>(`/chat/sessions/${sessionId}`),
+        api.get<PdfResource[]>(`/chat/sessions/${sessionId}/pdfs`),
+      ]);
       setActiveSessionId(detail.id);
       setMessages(
         detail.messages.map((m) => ({
@@ -79,6 +94,7 @@ export default function ChatPage() {
           content: m.content,
         }))
       );
+      setPdfResources(resources);
       setError(null);
     } catch {
       setError("Failed to load session");
@@ -88,7 +104,7 @@ export default function ChatPage() {
   function handleNewChat() {
     setActiveSessionId(null);
     setMessages([]);
-    setUploadedPdfs([]);
+    setPdfResources([]);
     setError(null);
     inputRef.current?.focus();
   }
@@ -112,43 +128,27 @@ export default function ChatPage() {
           const err = await res.json().catch(() => null);
           throw new Error(err?.detail || `Error ${res.status}`);
         }
-        const data = (await res.json()) as UploadedPdf;
-        setUploadedPdfs((prev) => [...prev, data]);
+        const data = (await res.json()) as {
+          pdf_id: number;
+          filename: string;
+          status: string;
+        };
+        upsertPdfResource({ ...data, source: "uploaded" });
         setError(null);
       } catch (err) {
-        const msg =
-          err instanceof Error ? err.message : "Failed to upload PDF";
+        const msg = err instanceof Error ? err.message : "Failed to upload PDF";
         setError(msg);
       }
     },
-    []
+    [upsertPdfResource]
   );
 
   async function handlePdfUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const formData = new FormData();
-    formData.append("file", file);
-
-    try {
-      const res = await fetch(`${config.apiBaseUrl}/files/upload`, {
-        method: "POST",
-        body: formData,
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => null);
-        throw new Error(err?.detail || `Error ${res.status}`);
-      }
-      const data = (await res.json()) as UploadedPdf;
-      setUploadedPdfs((prev) => [...prev, data]);
-      setError(null);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to upload PDF";
-      setError(msg);
-    } finally {
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+    await uploadPdfFile(file);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
     }
   }
 
@@ -187,7 +187,7 @@ export default function ChatPage() {
             role: m.role,
             content: m.content,
           })),
-          pdf_ids: uploadedPdfs.map((p) => p.pdf_id),
+          pdf_ids: pdfResources.map((p) => p.pdf_id),
           stream: true,
         }),
       });
@@ -239,6 +239,29 @@ export default function ChatPage() {
               if (last && last.tool === data.tool_result) {
                 last.result = data.result;
               }
+
+              if (data.tool_result === "fetch_pdf_and_upload" && data.result) {
+                try {
+                  const parsed = JSON.parse(data.result) as {
+                    pdf_id?: number;
+                    filename?: string;
+                    status?: string;
+                    source_url?: string;
+                  };
+                  if (parsed.pdf_id && parsed.filename) {
+                    upsertPdfResource({
+                      pdf_id: parsed.pdf_id,
+                      filename: parsed.filename,
+                      status: parsed.status || "processed",
+                      source: "fetched",
+                      source_url: parsed.source_url,
+                    });
+                  }
+                } catch {
+                  // ignore invalid payload
+                }
+              }
+
               setMessages((prev) => {
                 const updated = [...prev];
                 updated[updated.length - 1] = {
@@ -301,7 +324,6 @@ export default function ChatPage() {
 
   return (
     <div className={styles.container}>
-      {/* Session sidebar */}
       <aside className={styles.sessionSidebar}>
         <button className={styles.newChatBtn} onClick={handleNewChat}>
           + New Chat
@@ -336,7 +358,6 @@ export default function ChatPage() {
         </div>
       </aside>
 
-      {/* Main chat area */}
       <div
         className={`${styles.chatMain} ${dragOver ? styles.chatMainDragOver : ""}`}
         onDragOver={(e) => {
@@ -363,9 +384,7 @@ export default function ChatPage() {
           {messages.length === 0 ? (
             <div className={styles.empty}>
               <div className={styles.emptyIcon}>解</div>
-              <p className={styles.emptyTitle}>
-                Ask anything about your studies
-              </p>
+              <p className={styles.emptyTitle}>Ask anything about your studies</p>
               <p className={styles.emptyHint}>
                 Questions about schools, exam topics, study strategies, or past
                 exam problems — I&apos;m here to help you find your own answer.
@@ -395,20 +414,14 @@ export default function ChatPage() {
                     m.role === "user" ? styles.userMsg : styles.assistantMsg
                   }`}
                 >
-                  <div className={styles.msgAvatar}>
-                    {m.role === "user" ? "You" : "解"}
-                  </div>
+                  <div className={styles.msgAvatar}>{m.role === "user" ? "You" : "解"}</div>
                   <div className={styles.msgContent}>
                     {m.toolCalls && m.toolCalls.length > 0 && (
                       <div className={styles.toolCalls}>
                         {m.toolCalls.map((tc, j) => (
                           <div key={j} className={styles.toolCallItem}>
-                            <span className={styles.toolCallIcon}>
-                              {tc.result ? "✓" : "⟳"}
-                            </span>
-                            <span className={styles.toolCallName}>
-                              {tc.tool}
-                            </span>
+                            <span className={styles.toolCallIcon}>{tc.result ? "✓" : "⟳"}</span>
+                            <span className={styles.toolCallName}>{tc.tool}</span>
                             {tc.args && Object.keys(tc.args).length > 0 && (
                               <span className={styles.toolCallArgs}>
                                 {Object.values(tc.args).join(", ").slice(0, 80)}
@@ -460,15 +473,22 @@ export default function ChatPage() {
           >
             Upload PDF
           </button>
-          {uploadedPdfs.length > 0 && (
+          {pdfResources.length > 0 && (
             <div className={styles.pdfChipList}>
-              {uploadedPdfs.map((pdf) => (
-                <div key={pdf.pdf_id} className={styles.pdfChip}>
-                  <span>{pdf.filename}</span>
+              {pdfResources.map((pdf) => (
+                <div
+                  key={pdf.pdf_id}
+                  className={styles.pdfChip}
+                  title={pdf.source_url || `${pdf.source} · ${pdf.status}`}
+                >
+                  <span className={styles.pdfChipName}>{pdf.filename}</span>
+                  <span className={styles.pdfChipMeta}>
+                    {pdf.source} · {pdf.status}
+                  </span>
                   <button
                     type="button"
                     onClick={() =>
-                      setUploadedPdfs((prev) =>
+                      setPdfResources((prev) =>
                         prev.filter((item) => item.pdf_id !== pdf.pdf_id)
                       )
                     }

@@ -1,4 +1,6 @@
 import os
+import re
+import time
 from urllib.parse import urlparse
 
 import httpx
@@ -44,7 +46,6 @@ class FetchPdfAndUploadTool(BaseTool):
 
         content_type = resp.headers.get("Content-Type", "")
         if "pdf" not in content_type.lower():
-            # Best-effort check: still allow if the URL clearly looks like a PDF
             parsed = urlparse(args.url)
             if not parsed.path.lower().endswith(".pdf"):
                 return ToolResult(
@@ -56,10 +57,7 @@ class FetchPdfAndUploadTool(BaseTool):
                 )
 
         pdf_bytes = resp.content
-
-        # Derive a safe filename from the URL path
-        parsed = urlparse(args.url)
-        filename = os.path.basename(parsed.path) or "downloaded.pdf"
+        filename = _derive_pdf_filename(args.url, resp.headers.get("Content-Disposition", ""))
 
         async with async_session() as session:
             service = PdfService(session)
@@ -73,7 +71,6 @@ class FetchPdfAndUploadTool(BaseTool):
                     error=f"Failed to save or process PDF from {args.url}: {e}",
                 )
 
-        # Return a compact structure that the agent can easily weave into its answer
         return ToolResult(
             success=True,
             data={
@@ -86,3 +83,44 @@ class FetchPdfAndUploadTool(BaseTool):
             },
         )
 
+
+def _derive_pdf_filename(url: str, content_disposition: str) -> str:
+    filename_from_header = _parse_content_disposition_filename(content_disposition)
+    if filename_from_header:
+        return filename_from_header
+
+    parsed = urlparse(url)
+    path_name = os.path.basename(parsed.path)
+    if path_name:
+        return path_name
+
+    return f"downloaded-{int(time.time())}.pdf"
+
+
+def _parse_content_disposition_filename(content_disposition: str) -> str | None:
+    if not content_disposition:
+        return None
+
+    # RFC 5987: filename*=UTF-8''encoded-name.pdf
+    m = re.search(r"filename\*=([^;]+)", content_disposition, flags=re.IGNORECASE)
+    if m:
+        value = m.group(1).strip().strip('"')
+        if "''" in value:
+            _, encoded = value.split("''", 1)
+            try:
+                from urllib.parse import unquote
+
+                decoded = unquote(encoded)
+                if decoded:
+                    return decoded
+            except Exception:
+                pass
+
+    # fallback: filename="..."
+    m = re.search(r"filename=\"?([^\";]+)\"?", content_disposition, flags=re.IGNORECASE)
+    if m:
+        name = m.group(1).strip()
+        if name:
+            return name
+
+    return None

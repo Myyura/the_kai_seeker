@@ -12,6 +12,7 @@ from app.schemas.chat import (
     ChatResponseOut,
     ChatSessionDetail,
     ChatSessionOut,
+    ChatSessionPdfResourceOut,
 )
 from app.services.chat_service import ChatService
 
@@ -40,7 +41,7 @@ async def send_message(
         )
 
     try:
-        content, model, sid = await service.chat(req.messages, req.session_id, req.pdf_ids)
+        content, model, sid, _ = await service.chat(req.messages, req.session_id, req.pdf_ids)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception:
@@ -100,3 +101,17 @@ async def delete_session(
     deleted = await repo.delete_session(session_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")
+
+
+@router.get("/sessions/{session_id}/pdfs", response_model=list[ChatSessionPdfResourceOut])
+async def get_session_pdfs(
+    session_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> list[ChatSessionPdfResourceOut]:
+    repo = ConversationRepository(session)
+    chat_session = await repo.get_session(session_id)
+    if chat_session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    resources = await repo.list_session_pdf_resources(session_id)
+    return [ChatSessionPdfResourceOut.model_validate(r) for r in resources]

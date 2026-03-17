@@ -43,3 +43,11 @@ class ChatSessionOut(BaseModel):
 
 class ChatSessionDetail(ChatSessionOut):
     messages: list[ChatMessageOut]
+
+
+class ChatSessionPdfResourceOut(BaseModel):
+    pdf_id: int
+    filename: str
+    status: str
+    source: str
+    source_url: str | None = None

@@ -2,7 +2,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.conversation import ChatMessage, ChatSession
+from app.models.conversation import ChatMessage, ChatSession, ChatSessionPdfResource
+from app.models.pdf_document import PdfDocument
 
 
 class ConversationRepository:
@@ -64,3 +65,56 @@ class ConversationRepository:
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def attach_pdf_resource(
+        self,
+        session_id: int,
+        pdf_id: int,
+        *,
+        source_type: str = "uploaded",
+        source_url: str | None = None,
+    ) -> ChatSessionPdfResource:
+        stmt = select(ChatSessionPdfResource).where(
+            ChatSessionPdfResource.session_id == session_id,
+            ChatSessionPdfResource.pdf_id == pdf_id,
+        )
+        existing = (await self.session.execute(stmt)).scalar_one_or_none()
+        if existing:
+            if source_type == "fetched" and existing.source_type != "fetched":
+                existing.source_type = "fetched"
+            if source_url and not existing.source_url:
+                existing.source_url = source_url
+            await self.session.commit()
+            await self.session.refresh(existing)
+            return existing
+
+        resource = ChatSessionPdfResource(
+            session_id=session_id,
+            pdf_id=pdf_id,
+            source_type=source_type,
+            source_url=source_url,
+        )
+        self.session.add(resource)
+        await self.session.commit()
+        await self.session.refresh(resource)
+        return resource
+
+    async def list_session_pdf_resources(self, session_id: int) -> list[dict]:
+        stmt = (
+            select(ChatSessionPdfResource, PdfDocument)
+            .join(PdfDocument, PdfDocument.id == ChatSessionPdfResource.pdf_id)
+            .where(ChatSessionPdfResource.session_id == session_id)
+            .order_by(ChatSessionPdfResource.created_at.asc())
+        )
+        result = await self.session.execute(stmt)
+        rows = result.all()
+        return [
+            {
+                "pdf_id": doc.id,
+                "filename": doc.filename,
+                "status": doc.status,
+                "source": res.source_type,
+                "source_url": res.source_url,
+            }
+            for res, doc in rows
+        ]

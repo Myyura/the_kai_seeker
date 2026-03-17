@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -23,6 +23,9 @@ class ChatSession(Base):
     messages: Mapped[list["ChatMessage"]] = relationship(
         back_populates="session", cascade="all, delete-orphan", order_by="ChatMessage.created_at"
     )
+    pdf_resources: Mapped[list["ChatSessionPdfResource"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan", order_by="ChatSessionPdfResource.id"
+    )
 
 
 class ChatMessage(Base):
@@ -42,3 +45,25 @@ class ChatMessage(Base):
     )
 
     session: Mapped["ChatSession"] = relationship(back_populates="messages")
+
+
+class ChatSessionPdfResource(Base):
+    """PDF resources associated with a chat session."""
+
+    __tablename__ = "chat_session_pdf_resources"
+    __table_args__ = (UniqueConstraint("session_id", "pdf_id", name="uq_session_pdf"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    session_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    pdf_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("pdf_documents.id", ondelete="CASCADE"), nullable=False
+    )
+    source_type: Mapped[str] = mapped_column(String(16), nullable=False, default="uploaded")
+    source_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    session: Mapped["ChatSession"] = relationship(back_populates="pdf_resources")

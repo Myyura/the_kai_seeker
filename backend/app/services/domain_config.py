@@ -93,6 +93,15 @@ class DomainConfig:
     def workflow_hints(self) -> list[str]:
         return self.profile.get("workflow_hints", [])
 
+    @property
+    def max_tool_turns(self) -> int:
+        """Maximum number of tool-calling turns per agent run."""
+        value = self.profile.get("max_tool_turns")
+        try:
+            return int(value) if value is not None else 6
+        except (TypeError, ValueError):
+            return 6
+
     def search_sources(
         self,
         query: str | None = None,

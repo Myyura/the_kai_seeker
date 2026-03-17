@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 
 import asyncio
 
-MAX_TOOL_TURNS = 6
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 
@@ -170,7 +169,9 @@ async def run_agent_loop(
     """
     tool_call_log: list[dict] = []
 
-    for turn in range(MAX_TOOL_TURNS):
+    max_tool_turns = domain_config.max_tool_turns
+
+    for turn in range(max_tool_turns):
         response = await _chat_with_retry(provider, messages)
         text = response.content
 
@@ -205,7 +206,7 @@ async def run_agent_loop(
             content=f"<tool_result>\n{result_text}\n</tool_result>",
         ))
 
-    logger.warning("Agent reached max tool turns (%d)", MAX_TOOL_TURNS)
+    logger.warning("Agent reached max tool turns (%d)", max_tool_turns)
     final = await _chat_with_retry(provider, messages)
     return final.content, tool_call_log
 

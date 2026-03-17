@@ -23,5 +23,6 @@
     "Use fetch_question to get the full question content",
     "Use lookup_source to find official school URLs for admission info",
     "Explain or solve the question for the user"
-  ]
+  ],
+  "max_tool_turns": 20
 }

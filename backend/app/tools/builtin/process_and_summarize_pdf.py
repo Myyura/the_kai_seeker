@@ -14,26 +14,44 @@ class ProcessAndSummarizePdfTool(BaseTool):
     )
 
     class Args(BaseModel):
-        pdf_id: int | None = Field(default=None, description="Uploaded PDF id. If omitted, uses active chat PDF.")
+        pdf_id: int | None = Field(
+            default=None,
+            description=(
+                "Uploaded PDF id. If omitted, will run on all active chat PDFs "
+                "(or the single active PDF if only one is provided)."
+            ),
+        )
         focus: str | None = Field(default=None, description="Optional focus area for summary.")
 
     async def execute(self, args: Args) -> ToolResult:
-        pdf_id = args.pdf_id
-        if pdf_id is None:
-            active = get_active_pdf_ids()
-            if active:
-                pdf_id = active[0]
+        # Explicit pdf_id: process just that one
+        if args.pdf_id is not None:
+            async with async_session() as session:
+                service = PdfService(session)
+                try:
+                    result = await service.process_and_summarize(pdf_id=args.pdf_id, focus=args.focus)
+                except ValueError as e:
+                    return ToolResult(success=False, error=str(e))
+                return ToolResult(success=True, data=result)
 
-        if pdf_id is None:
+        # No explicit id: use all active PDFs in the current chat context
+        active_ids = get_active_pdf_ids()
+        if not active_ids:
             return ToolResult(
                 success=False,
-                error="Missing pdf_id. Please upload a PDF first or pass pdf_id explicitly.",
+                error="Missing pdf_id. Please upload at least one PDF first or pass pdf_id explicitly.",
             )
 
         async with async_session() as session:
             service = PdfService(session)
-            try:
-                result = await service.process_and_summarize(pdf_id=pdf_id, focus=args.focus)
-            except ValueError as e:
-                return ToolResult(success=False, error=str(e))
-            return ToolResult(success=True, data=result)
+            results: list[dict] = []
+            for pid in active_ids:
+                try:
+                    res = await service.process_and_summarize(pdf_id=pid, focus=args.focus)
+                except ValueError as e:
+                    # Skip missing/invalid PDFs but record the error message
+                    results.append({"pdf_id": pid, "error": str(e)})
+                else:
+                    results.append(res)
+
+        return ToolResult(success=True, data={"results": results})

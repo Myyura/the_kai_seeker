@@ -1,5 +1,6 @@
 from app.tools.builtin.echo import EchoTool
 from app.tools.builtin.fetch_question import FetchQuestionTool
+from app.tools.builtin.fetch_pdf_and_upload import FetchPdfAndUploadTool
 from app.tools.builtin.lookup_source import LookupSourceTool
 from app.tools.builtin.process_and_summarize_pdf import ProcessAndSummarizePdfTool
 from app.tools.builtin.query_pdf_details import QueryPdfDetailsTool
@@ -16,6 +17,7 @@ def register_builtin_tools() -> None:
     tool_registry.register(SearchSchoolsTool())
     tool_registry.register(SearchQuestionsTool())
     tool_registry.register(FetchQuestionTool())
+    tool_registry.register(FetchPdfAndUploadTool())
     tool_registry.register(LookupSourceTool())
     tool_registry.register(ProcessAndSummarizePdfTool())
     tool_registry.register(QueryPdfDetailsTool())

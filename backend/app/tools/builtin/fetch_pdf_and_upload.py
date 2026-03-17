@@ -1,0 +1,88 @@
+import os
+from urllib.parse import urlparse
+
+import httpx
+from pydantic import BaseModel, Field
+
+from app.db.engine import async_session
+from app.services.pdf_service import PdfService
+from app.tools.base import BaseTool, ToolResult
+
+
+class FetchPdfAndUploadTool(BaseTool):
+    name = "fetch_pdf_and_upload"
+    description = (
+        "Download a PDF from a URL, save it into the local PDF store, "
+        "run full processing (including OCR when needed), and return a summary. "
+        "Use this when you discover a PDF link on the web (e.g.,募集要項)."
+    )
+
+    class Args(BaseModel):
+        url: str = Field(
+            description=(
+                "Direct URL to a PDF file (must be publicly accessible over HTTP/HTTPS). "
+                "Prefer official募集要項 or admission guideline PDFs."
+            )
+        )
+        focus: str | None = Field(
+            default=None,
+            description="Optional focus area for the summary (e.g., eligibility, exam subjects).",
+        )
+
+    async def execute(self, args: Args) -> ToolResult:
+        try:
+            async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+                resp = await client.get(args.url)
+                resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            return ToolResult(
+                success=False,
+                error=f"HTTP {e.response.status_code} when fetching PDF: {args.url}",
+            )
+        except Exception as e:
+            return ToolResult(success=False, error=f"Failed to fetch PDF from {args.url}: {e}")
+
+        content_type = resp.headers.get("Content-Type", "")
+        if "pdf" not in content_type.lower():
+            # Best-effort check: still allow if the URL clearly looks like a PDF
+            parsed = urlparse(args.url)
+            if not parsed.path.lower().endswith(".pdf"):
+                return ToolResult(
+                    success=False,
+                    error=(
+                        f"URL does not appear to be a PDF (Content-Type: {content_type!r}). "
+                        "Please provide a direct link to a PDF file."
+                    ),
+                )
+
+        pdf_bytes = resp.content
+
+        # Derive a safe filename from the URL path
+        parsed = urlparse(args.url)
+        filename = os.path.basename(parsed.path) or "downloaded.pdf"
+
+        async with async_session() as session:
+            service = PdfService(session)
+            try:
+                upload_info = await service.save_upload(filename=filename, content=pdf_bytes)
+                pdf_id = upload_info["pdf_id"]
+                processed = await service.process_and_summarize(pdf_id=pdf_id, focus=args.focus)
+            except Exception as e:
+                return ToolResult(
+                    success=False,
+                    error=f"Failed to save or process PDF from {args.url}: {e}",
+                )
+
+        # Return a compact structure that the agent can easily weave into its answer
+        return ToolResult(
+            success=True,
+            data={
+                "source_url": args.url,
+                "pdf_id": processed["pdf_id"],
+                "filename": filename,
+                "status": processed["status"],
+                "image_pages": processed.get("image_pages", []),
+                "summary_markdown": processed.get("summary_markdown", ""),
+            },
+        )
+

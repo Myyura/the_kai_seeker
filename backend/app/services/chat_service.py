@@ -115,7 +115,15 @@ class ChatService:
 
             async def on_tool_call(name: str, args: dict, result: str) -> None:
                 tool_events.append({"tool_call": name, "args": args})
-                tool_events.append({"tool_result": name, "result": result[:500]})
+                # For most tools we truncate the textual result for streaming,
+                # but some tools (like fetch_pdf_and_upload) return compact JSON
+                # that the frontend needs to parse in full. In those cases,
+                # avoid truncation so the JSON stays valid.
+                if name == "fetch_pdf_and_upload":
+                    trimmed_result = result
+                else:
+                    trimmed_result = result[:500]
+                tool_events.append({"tool_result": name, "result": trimmed_result})
 
             with set_active_pdf_ids(pdf_ids or []):
                 final_answer, _ = await run_agent_loop(

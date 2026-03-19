@@ -1,8 +1,16 @@
+import json
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.conversation import ChatMessage, ChatSession, ChatSessionPdfResource
+from app.models.conversation import (
+    ChatMessage,
+    ChatRun,
+    ChatRunEvent,
+    ChatSession,
+    ChatSessionPdfResource,
+)
 from app.models.pdf_document import PdfDocument
 
 
@@ -26,7 +34,10 @@ class ConversationRepository:
         stmt = (
             select(ChatSession)
             .where(ChatSession.id == session_id)
-            .options(selectinload(ChatSession.messages))
+            .options(
+                selectinload(ChatSession.messages),
+                selectinload(ChatSession.runs).selectinload(ChatRun.events),
+            )
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
@@ -65,6 +76,49 @@ class ConversationRepository:
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def create_run(self, session_id: int, status: str = "running") -> ChatRun:
+        run = ChatRun(session_id=session_id, status=status)
+        self.session.add(run)
+        await self.session.commit()
+        await self.session.refresh(run)
+        return run
+
+    async def add_run_event(
+        self,
+        run_id: int,
+        sequence: int,
+        event_type: str,
+        payload: dict,
+    ) -> ChatRunEvent:
+        event = ChatRunEvent(
+            run_id=run_id,
+            sequence=sequence,
+            event_type=event_type,
+            payload=json.dumps(payload, ensure_ascii=False),
+        )
+        self.session.add(event)
+        await self.session.commit()
+        await self.session.refresh(event)
+        return event
+
+    async def update_run(
+        self,
+        run_id: int,
+        *,
+        status: str | None = None,
+        assistant_message_id: int | None = None,
+    ) -> ChatRun | None:
+        run = await self.session.get(ChatRun, run_id)
+        if run is None:
+            return None
+        if status is not None:
+            run.status = status
+        if assistant_message_id is not None:
+            run.assistant_message_id = assistant_message_id
+        await self.session.commit()
+        await self.session.refresh(run)
+        return run
 
     async def attach_pdf_resource(
         self,

@@ -249,40 +249,125 @@
   font-style: italic;
 }
 
-/* Tool call status */
-.toolCalls {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 10px;
+/* Run timeline */
+.runCard {
+  margin: 10px 0 4px 44px;
+  padding: 12px 14px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  background:
+    linear-gradient(180deg, rgba(46, 133, 85, 0.05), rgba(46, 133, 85, 0.02)),
+    var(--card-bg);
 }
 
-.toolCallItem {
+.runCardLive {
+  border-color: rgba(46, 133, 85, 0.35);
+  box-shadow: 0 0 0 1px rgba(46, 133, 85, 0.08);
+}
+
+.runHeader {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-radius: var(--radius-xs);
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
-  font-size: 0.8rem;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  margin-bottom: 0;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
 }
 
-.toolCallIcon {
+.runTitleWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.runTitle {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.runMeta {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.runHeaderRight {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   flex-shrink: 0;
-  font-size: 0.85rem;
 }
 
-.toolCallName {
+.runState {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+}
+
+.runToggle {
+  font-size: 0.76rem;
   font-weight: 600;
   color: var(--color-primary);
 }
 
-.toolCallArgs {
+.runSteps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.runStep {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-xs);
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(46, 133, 85, 0.15);
+  font-size: 0.82rem;
+}
+
+.runStepTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.runStepIcon {
+  flex-shrink: 0;
+  font-size: 0.84rem;
+}
+
+.runStepName {
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.runStepArgs {
   color: var(--color-text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.runStepError {
+  color: #b42318;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.runEmpty {
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  margin-top: 10px;
 }
 
 /* Error bar */
@@ -420,6 +505,10 @@
   .sessionBtn {
     white-space: nowrap;
     max-width: 140px;
+  }
+
+  .runCard {
+    margin-left: 0;
   }
 }
 

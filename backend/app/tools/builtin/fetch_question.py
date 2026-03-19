@@ -20,6 +20,8 @@ class FetchQuestionTool(BaseTool):
         "Requires a question_id obtained from the search_questions tool. "
         "Returns the complete problem statement and solution."
     )
+    display_name = "Fetch Question"
+    activity_label = "Fetching question details"
 
     class Args(BaseModel):
         question_id: str = Field(

@@ -13,8 +13,9 @@ Source: https://github.com/Myyura/the_kai_seeker
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, Awaitable, Callable
 
+from app.config.agent_policy import build_tool_policy
 from app.providers.base import BaseLLMProvider, ChatMessage
 from app.services.domain_config import domain_config
 from app.skills.registry import skill_registry
@@ -31,31 +32,6 @@ TOOL_CALL_PATTERN = re.compile(
     r"<tool_call>\s*(\{.*?\})\s*</tool_call>",
     re.DOTALL,
 )
-
-TOOL_INSTRUCTIONS = """
-
-## Available Tools
-
-You have access to the following tools. **You should actively use tools** whenever a question involves:
-- Looking up real-time or specific web page content
-- Fetching official school/program/exam information from URLs
-- Any task where accurate, up-to-date information is needed rather than relying on your training data
-
-To use a tool, respond ONLY with a tool_call block (no other text before it):
-
-<tool_call>
-{{"name": "tool_name", "arguments": {{"param1": "value1"}}}}
-</tool_call>
-
-Important rules:
-- Output ONLY the <tool_call> block when you want to use a tool, with no extra text
-- You may call ONE tool per response
-- After you receive the result in <tool_result>, you can call another tool or give your final answer
-- When you have enough information, respond with your final answer as normal text (no tool_call block)
-- If the user explicitly asks you to fetch a URL or use a specific tool, you MUST use it
-
-Tools:
-{tool_list}"""
 
 
 def _build_base_prompt() -> str:
@@ -113,22 +89,7 @@ def build_system_prompt(user_message: str = "") -> str:
 
     tools = tool_registry.list_all()
     if tools:
-        tool_descriptions = []
-        for t in tools:
-            s = t.schema()
-            params = s.get("parameters", [])
-            params_desc = ""
-            if params:
-                parts = ", ".join(
-                    f'{p["name"]} ({p["type"]}, {"required" if p["required"] else "optional"}): '
-                    f'{p["description"]}'
-                    for p in params
-                )
-                params_desc = f"  Parameters: {parts}"
-            tool_descriptions.append(f"- **{s['name']}**: {s['description']}\n{params_desc}")
-
-        tool_list = "\n".join(tool_descriptions)
-        prompt += TOOL_INSTRUCTIONS.format(tool_list=tool_list)
+        prompt += build_tool_policy(t.schema() for t in tools)
 
     return prompt
 
@@ -153,15 +114,14 @@ def strip_tool_call(text: str) -> str:
 async def run_agent_loop(
     provider: BaseLLMProvider,
     messages: list[ChatMessage],
-    on_tool_call: Any | None = None,
+    on_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> tuple[str, list[dict]]:
     """Run the Agent loop: LLM → parse → execute tool → feed back → repeat.
 
     Args:
         provider: The LLM provider to use.
         messages: Full message list including system prompt.
-        on_tool_call: Optional async callback(tool_name, tool_args, tool_result)
-                      for streaming progress to the frontend.
+        on_event: Optional async callback(event_dict) for streaming progress.
 
     Returns:
         (final_answer, tool_call_log) where tool_call_log is a list of
@@ -172,6 +132,13 @@ async def run_agent_loop(
     max_tool_turns = domain_config.max_tool_turns
 
     for turn in range(max_tool_turns):
+        if on_event:
+            await on_event({
+                "type": "status",
+                "status": "thinking",
+                "label": "Thinking",
+                "detail": "Planning the next step",
+            })
         response = await _chat_with_retry(provider, messages)
         text = response.content
 
@@ -181,17 +148,48 @@ async def run_agent_loop(
 
         tool_name = tool_call.get("name", "")
         tool_args = tool_call.get("arguments", {})
+        tool = tool_registry.get(tool_name)
+        tool_display_name = tool.display_name if tool else tool_name
+        tool_activity_label = tool.activity_label if tool else tool_display_name
+        tool_call_id = f"tool-{turn + 1}"
 
         logger.info("Agent tool call [turn %d]: %s(%s)", turn + 1, tool_name, tool_args)
+
+        if on_event:
+            await on_event({
+                "type": "tool.started",
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_name,
+                "tool_display_name": tool_display_name,
+                "tool_activity_label": tool_activity_label,
+                "args": tool_args,
+            })
 
         result = await tool_registry.execute(tool_name, **tool_args)
         result_text = result.to_text()
 
-        log_entry = {"tool": tool_name, "args": tool_args, "result": result_text}
+        log_entry = {
+            "tool": tool_name,
+            "tool_display_name": tool_display_name,
+            "tool_activity_label": tool_activity_label,
+            "tool_call_id": tool_call_id,
+            "args": tool_args,
+            "result": result_text,
+            "success": result.success,
+        }
         tool_call_log.append(log_entry)
 
-        if on_tool_call:
-            await on_tool_call(tool_name, tool_args, result_text)
+        if on_event:
+            await on_event({
+                "type": "tool.finished",
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_name,
+                "tool_display_name": tool_display_name,
+                "tool_activity_label": tool_activity_label,
+                "args": tool_args,
+                "result": result_text,
+                "success": result.success,
+            })
 
         remaining_text = strip_tool_call(text)
         if remaining_text:

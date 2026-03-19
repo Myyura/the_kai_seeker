@@ -1,20 +1,57 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { config } from "@/lib/config";
 import styles from "./page.module.css";
 
-interface ToolCallInfo {
-  tool: string;
-  args: Record<string, unknown>;
-  result?: string;
-}
-
-interface Message {
+interface StoredMessage {
+  id?: number;
   role: "user" | "assistant";
   content: string;
-  toolCalls?: ToolCallInfo[];
+  createdAt?: string;
+}
+
+interface RunEventPayload {
+  sequence: number;
+  type: string;
+  status?: string;
+  label?: string;
+  detail?: string;
+  run_id?: number;
+  tool_call_id?: string;
+  tool_name?: string;
+  tool_display_name?: string;
+  tool_activity_label?: string;
+  args?: Record<string, unknown>;
+  success?: boolean;
+  error_message?: string;
+  assistant_message_id?: number;
+  delta?: string;
+  content?: string;
+  message?: string;
+  resource?: {
+    pdf_id?: number;
+    filename?: string | null;
+    status?: string | null;
+    source_url?: string | null;
+  };
+}
+
+interface RunEvent {
+  id?: number;
+  eventType?: string;
+  createdAt?: string;
+  payload: RunEventPayload;
+}
+
+interface RunRecord {
+  id: number | string;
+  assistantMessageId?: number | null;
+  status: string;
+  createdAt?: string;
+  updatedAt?: string;
+  events: RunEvent[];
 }
 
 interface Session {
@@ -26,7 +63,21 @@ interface Session {
 interface SessionDetail {
   id: number;
   title: string;
-  messages: { id: number; role: string; content: string }[];
+  messages: { id: number; role: string; content: string; created_at: string }[];
+  runs: {
+    id: number;
+    assistant_message_id: number | null;
+    status: string;
+    created_at: string;
+    updated_at: string;
+    events: {
+      id: number;
+      sequence: number;
+      event_type: string;
+      created_at: string;
+      payload: RunEventPayload;
+    }[];
+  }[];
 }
 
 interface PdfResource {
@@ -37,10 +88,180 @@ interface PdfResource {
   source_url?: string | null;
 }
 
+interface ToolStep {
+  id: string;
+  name: string;
+  activity: string;
+  args: Record<string, unknown>;
+  success?: boolean;
+  errorMessage?: string;
+  finished: boolean;
+}
+
+function normalizeRunEvent(payload: RunEventPayload): RunEventPayload {
+  return {
+    ...payload,
+    sequence: payload.sequence ?? 0,
+    type: payload.type ?? "unknown",
+  };
+}
+
+function hydrateRun(detailRun: SessionDetail["runs"][number]): RunRecord {
+  return {
+    id: detailRun.id,
+    assistantMessageId: detailRun.assistant_message_id,
+    status: detailRun.status,
+    createdAt: detailRun.created_at,
+    updatedAt: detailRun.updated_at,
+    events: detailRun.events.map((event) => ({
+      id: event.id,
+      eventType: event.event_type,
+      createdAt: event.created_at,
+      payload: normalizeRunEvent(event.payload),
+    })),
+  };
+}
+
+function formatArgs(args?: Record<string, unknown>): string {
+  if (!args) return "";
+  const pairs = Object.entries(args)
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .map(([key, value]) => {
+      const text = Array.isArray(value) ? value.join(", ") : String(value);
+      return `${key}: ${text}`;
+    });
+  return pairs.join(" · ");
+}
+
+function getToolSteps(events: RunEvent[]): ToolStep[] {
+  const ordered: ToolStep[] = [];
+  const byId = new Map<string, ToolStep>();
+
+  for (const event of events) {
+    const payload = event.payload;
+    if (payload.type !== "tool.started" && payload.type !== "tool.finished") {
+      continue;
+    }
+
+    const id = payload.tool_call_id || `event-${payload.sequence}`;
+    let step = byId.get(id);
+    if (!step) {
+      step = {
+        id,
+        name: payload.tool_display_name || payload.tool_name || "Tool",
+        activity:
+          payload.tool_activity_label ||
+          payload.tool_display_name ||
+          payload.tool_name ||
+          "Working",
+        args: payload.args || {},
+        finished: false,
+      };
+      byId.set(id, step);
+      ordered.push(step);
+    }
+
+    if (payload.args) {
+      step.args = payload.args;
+    }
+    if (payload.tool_display_name || payload.tool_name) {
+      step.name = payload.tool_display_name || payload.tool_name || step.name;
+    }
+    if (payload.tool_activity_label) {
+      step.activity = payload.tool_activity_label;
+    }
+    if (payload.type === "tool.finished") {
+      step.finished = true;
+      step.success = payload.success;
+      step.errorMessage = payload.error_message;
+    }
+  }
+
+  return ordered;
+}
+
+function getRunHeadline(run: RunRecord): string {
+  const lastEvent = [...run.events].reverse().find((event) => event.payload.type === "status");
+  const steps = getToolSteps(run.events);
+  const activeStep = [...steps].reverse().find((step) => !step.finished);
+
+  if (run.status === "failed") return "Run failed";
+  if (activeStep) return activeStep.activity;
+  if (run.status === "completed") {
+    return steps.length > 0
+      ? `${steps.length} tool${steps.length > 1 ? "s" : ""} completed`
+      : "Completed";
+  }
+  if (lastEvent?.payload.label) return lastEvent.payload.label;
+  return "Working";
+}
+
+function RunCard({ run, live = false }: { run: RunRecord; live?: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const steps = getToolSteps(run.events);
+  const headline = getRunHeadline(run);
+  const latestStep = steps[steps.length - 1];
+
+  return (
+    <div className={`${styles.runCard} ${live ? styles.runCardLive : ""}`}>
+      <button
+        type="button"
+        className={styles.runHeader}
+        onClick={() => setExpanded((prev) => !prev)}
+        aria-expanded={expanded}
+      >
+        <span className={styles.runTitleWrap}>
+          <span className={styles.runTitle}>{headline}</span>
+          <span className={styles.runMeta}>
+            {steps.length > 0
+              ? `${steps.length} tool${steps.length > 1 ? "s" : ""}`
+              : live
+                ? "waiting"
+                : "no tools"}
+            {latestStep ? ` · latest: ${latestStep.name}` : ""}
+          </span>
+        </span>
+        <span className={styles.runHeaderRight}>
+          <span className={styles.runState}>{run.status}</span>
+          <span className={styles.runToggle}>{expanded ? "Hide" : "Show"}</span>
+        </span>
+      </button>
+      {expanded && steps.length > 0 && (
+        <div className={styles.runSteps}>
+          {steps.map((step) => (
+            <div key={step.id} className={styles.runStep}>
+              <div className={styles.runStepTop}>
+                <span className={styles.runStepIcon}>
+                  {step.finished ? (step.success === false ? "!" : "✓") : "⟳"}
+                </span>
+                <span className={styles.runStepName}>{step.name}</span>
+              </div>
+              {formatArgs(step.args) && (
+                <div className={styles.runStepArgs}>{formatArgs(step.args)}</div>
+              )}
+              {step.success === false && step.errorMessage && (
+                <div className={styles.runStepError}>{step.errorMessage}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {expanded && steps.length === 0 && (
+        <div className={styles.runEmpty}>
+          {live ? "Waiting for the first tool call…" : "No tool calls recorded."}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ChatPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<StoredMessage[]>([]);
+  const [runs, setRuns] = useState<RunRecord[]>([]);
+  const [streamingRun, setStreamingRun] = useState<RunRecord | null>(null);
+  const [streamingAssistant, setStreamingAssistant] = useState("");
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,9 +285,49 @@ export default function ChatPage() {
     });
   }, []);
 
+  const applyRunEvent = useCallback(
+    (payload: RunEventPayload) => {
+      const event = { payload: normalizeRunEvent(payload) };
+
+      setStreamingRun((prev) => {
+        const runId = payload.run_id ?? (typeof prev?.id === "number" ? prev.id : prev?.id);
+        const base: RunRecord = prev || {
+          id: runId || `pending-${Date.now()}`,
+          status: payload.status || "running",
+          events: [],
+        };
+
+        let nextStatus = base.status;
+        if (payload.type === "run.started") nextStatus = payload.status || "running";
+        if (payload.type === "status" && payload.status) nextStatus = payload.status;
+        if (payload.type === "run.completed") nextStatus = payload.status || "completed";
+        if (payload.type === "error") nextStatus = "failed";
+
+        return {
+          ...base,
+          id: runId || base.id,
+          status: nextStatus,
+          assistantMessageId: payload.assistant_message_id ?? base.assistantMessageId,
+          events: [...base.events, event],
+        };
+      });
+
+      if (payload.resource?.pdf_id && payload.resource.filename) {
+        upsertPdfResource({
+          pdf_id: payload.resource.pdf_id,
+          filename: payload.resource.filename,
+          status: payload.resource.status || "processed",
+          source: "fetched",
+          source_url: payload.resource.source_url,
+        });
+      }
+    },
+    [upsertPdfResource]
+  );
+
   useEffect(() => {
     scrollToBottom();
-  }, [messages, scrollToBottom]);
+  }, [messages, runs, streamingRun, streamingAssistant, scrollToBottom]);
 
   useEffect(() => {
     loadSessions();
@@ -89,11 +350,16 @@ export default function ChatPage() {
       ]);
       setActiveSessionId(detail.id);
       setMessages(
-        detail.messages.map((m) => ({
-          role: m.role as "user" | "assistant",
-          content: m.content,
+        detail.messages.map((message) => ({
+          id: message.id,
+          role: message.role as "user" | "assistant",
+          content: message.content,
+          createdAt: message.created_at,
         }))
       );
+      setRuns(detail.runs.map(hydrateRun));
+      setStreamingRun(null);
+      setStreamingAssistant("");
       setPdfResources(resources);
       setError(null);
     } catch {
@@ -104,6 +370,9 @@ export default function ChatPage() {
   function handleNewChat() {
     setActiveSessionId(null);
     setMessages([]);
+    setRuns([]);
+    setStreamingRun(null);
+    setStreamingAssistant("");
     setPdfResources([]);
     setError(null);
     inputRef.current?.focus();
@@ -172,10 +441,14 @@ export default function ChatPage() {
     setInput("");
     setError(null);
 
-    const userMsg: Message = { role: "user", content: text };
+    const userMsg: StoredMessage = { role: "user", content: text };
     const allMessages = [...messages, userMsg];
-    setMessages([...allMessages, { role: "assistant", content: "" }]);
+    setMessages(allMessages);
+    setStreamingRun({ id: `pending-${Date.now()}`, status: "thinking", events: [] });
+    setStreamingAssistant("");
     setStreaming(true);
+
+    let streamedSessionId = activeSessionId;
 
     try {
       const res = await fetch(`${config.apiBaseUrl}/chat/`, {
@@ -183,11 +456,11 @@ export default function ChatPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           session_id: activeSessionId,
-          messages: allMessages.map((m) => ({
-            role: m.role,
-            content: m.content,
+          messages: allMessages.map((message) => ({
+            role: message.role,
+            content: message.content,
           })),
-          pdf_ids: pdfResources.map((p) => p.pdf_id),
+          pdf_ids: pdfResources.map((pdf) => pdf.pdf_id),
           stream: true,
         }),
       });
@@ -201,114 +474,102 @@ export default function ChatPage() {
       if (!reader) throw new Error("No stream available");
 
       const decoder = new TextDecoder();
-      let assistantContent = "";
-      const toolCalls: ToolCallInfo[] = [];
+      let buffer = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
+        buffer += decoder.decode(value, { stream: true });
+        const eventBlocks = buffer.split("\n\n");
+        buffer = eventBlocks.pop() || "";
 
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const payload = line.slice(6).trim();
-          if (payload === "[DONE]") continue;
+        for (const block of eventBlocks) {
+          const payload = block
+            .split("\n")
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice(5).trimStart())
+            .join("\n")
+            .trim();
 
-          try {
-            const data = JSON.parse(payload);
-            if (data.error) throw new Error(data.error);
-            if (data.session_id && !activeSessionId) {
-              setActiveSessionId(data.session_id);
-            }
-            if (data.tool_call) {
-              toolCalls.push({ tool: data.tool_call, args: data.args || {} });
-              setMessages((prev) => {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  role: "assistant",
-                  content: "",
-                  toolCalls: [...toolCalls],
-                };
-                return updated;
-              });
-            }
-            if (data.tool_result) {
-              const last = toolCalls[toolCalls.length - 1];
-              if (last && last.tool === data.tool_result) {
-                last.result = data.result;
-              }
+          if (!payload || payload === "[DONE]") continue;
 
-              if (data.tool_result === "fetch_pdf_and_upload" && data.result) {
-                try {
-                  const parsed = JSON.parse(data.result) as {
-                    pdf_id?: number;
-                    filename?: string;
-                    status?: string;
-                    source_url?: string;
-                  };
-                  if (parsed.pdf_id && parsed.filename) {
-                    upsertPdfResource({
-                      pdf_id: parsed.pdf_id,
-                      filename: parsed.filename,
-                      status: parsed.status || "processed",
-                      source: "fetched",
-                      source_url: parsed.source_url,
-                    });
-                  }
-                } catch {
-                  // ignore invalid payload
-                }
-              }
+          const data = JSON.parse(payload) as RunEventPayload & { session_id?: number; error?: string };
+          if (data.error) throw new Error(data.error);
 
-              setMessages((prev) => {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  role: "assistant",
-                  content: "",
-                  toolCalls: [...toolCalls],
-                };
-                return updated;
-              });
-            }
-            if (data.token) {
-              assistantContent += data.token;
-              setMessages((prev) => {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  role: "assistant",
-                  content: assistantContent,
-                  toolCalls: toolCalls.length > 0 ? [...toolCalls] : undefined,
-                };
-                return updated;
-              });
-            }
-          } catch (parseErr) {
-            if (
-              parseErr instanceof Error &&
-              parseErr.message !== "Unexpected end of JSON input"
-            ) {
-              throw parseErr;
-            }
+          if (data.session_id) {
+            streamedSessionId = data.session_id;
+            setActiveSessionId(data.session_id);
+            continue;
+          }
+
+          if (data.type === "answer.delta") {
+            setStreamingAssistant((prev) => prev + (data.delta || ""));
+            continue;
+          }
+
+          if (data.type === "answer.completed") {
+            setStreamingAssistant(data.content || "");
+            continue;
+          }
+
+          if (data.type === "error") {
+            setError(data.message || "Something went wrong");
+          }
+
+          applyRunEvent(data);
+        }
+      }
+
+      if (buffer.trim()) {
+        const payload = buffer
+          .split("\n")
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice(5).trimStart())
+          .join("\n")
+          .trim();
+        if (payload && payload !== "[DONE]") {
+          const data = JSON.parse(payload) as RunEventPayload & {
+            session_id?: number;
+            error?: string;
+          };
+          if (data.type === "answer.completed") {
+            setStreamingAssistant(data.content || "");
+          } else if (data.type === "error") {
+            setError(data.message || "Something went wrong");
+            applyRunEvent(data);
+          } else if (!data.session_id) {
+            applyRunEvent(data);
           }
         }
       }
 
-      await loadSessions();
+      if (streamedSessionId) {
+        await loadSession(streamedSessionId);
+      } else {
+        await loadSessions();
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Something went wrong";
       setError(msg);
-      setMessages((prev) => {
-        if (
-          prev.length > 0 &&
-          prev[prev.length - 1].role === "assistant" &&
-          prev[prev.length - 1].content === ""
-        ) {
-          return prev.slice(0, -1);
-        }
-        return prev;
-      });
+      setStreamingRun((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: "failed",
+              events: [
+                ...prev.events,
+                {
+                  payload: {
+                    sequence: prev.events.length + 1,
+                    type: "error",
+                    message: msg,
+                  },
+                },
+              ],
+            }
+          : null
+      );
     } finally {
       setStreaming(false);
       inputRef.current?.focus();
@@ -319,6 +580,16 @@ export default function ChatPage() {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit(e);
+    }
+  }
+
+  const runsByAssistantMessageId = new Map<number, RunRecord>();
+  const orphanRuns: RunRecord[] = [];
+  for (const run of runs) {
+    if (run.assistantMessageId) {
+      runsByAssistantMessageId.set(run.assistantMessageId, run);
+    } else {
+      orphanRuns.push(run);
     }
   }
 
@@ -345,8 +616,8 @@ export default function ChatPage() {
               </button>
               <button
                 className={styles.sessionDeleteBtn}
-                onClick={(e) => {
-                  e.stopPropagation();
+                onClick={(event) => {
+                  event.stopPropagation();
                   handleDeleteSession(s.id);
                 }}
                 title="Delete"
@@ -360,18 +631,18 @@ export default function ChatPage() {
 
       <div
         className={`${styles.chatMain} ${dragOver ? styles.chatMainDragOver : ""}`}
-        onDragOver={(e) => {
-          e.preventDefault();
+        onDragOver={(event) => {
+          event.preventDefault();
           setDragOver(true);
         }}
-        onDragLeave={(e) => {
-          e.preventDefault();
+        onDragLeave={(event) => {
+          event.preventDefault();
           setDragOver(false);
         }}
-        onDrop={async (e) => {
-          e.preventDefault();
+        onDrop={async (event) => {
+          event.preventDefault();
           setDragOver(false);
-          const file = e.dataTransfer.files?.[0];
+          const file = event.dataTransfer.files?.[0];
           if (!file) return;
           await uploadPdfFile(file);
         }}
@@ -381,7 +652,7 @@ export default function ChatPage() {
         </div>
 
         <div className={styles.chatArea}>
-          {messages.length === 0 ? (
+          {messages.length === 0 && !streamingRun && !streamingAssistant ? (
             <div className={styles.empty}>
               <div className={styles.emptyIcon}>解</div>
               <p className={styles.emptyTitle}>Ask anything about your studies</p>
@@ -394,53 +665,63 @@ export default function ChatPage() {
                   "东京大学情報理工学系の入試科目を教えてください",
                   "How should I prepare for math in graduate entrance exams?",
                   "帮我分析一下京都大学和东北大学信息学研究科的区别",
-                ].map((s) => (
+                ].map((suggestion) => (
                   <button
-                    key={s}
+                    key={suggestion}
                     className={styles.suggestion}
-                    onClick={() => setInput(s)}
+                    onClick={() => setInput(suggestion)}
                   >
-                    {s}
+                    {suggestion}
                   </button>
                 ))}
               </div>
             </div>
           ) : (
             <div className={styles.messages}>
-              {messages.map((m, i) => (
-                <div
-                  key={i}
-                  className={`${styles.message} ${
-                    m.role === "user" ? styles.userMsg : styles.assistantMsg
-                  }`}
-                >
-                  <div className={styles.msgAvatar}>{m.role === "user" ? "You" : "解"}</div>
-                  <div className={styles.msgContent}>
-                    {m.toolCalls && m.toolCalls.length > 0 && (
-                      <div className={styles.toolCalls}>
-                        {m.toolCalls.map((tc, j) => (
-                          <div key={j} className={styles.toolCallItem}>
-                            <span className={styles.toolCallIcon}>{tc.result ? "✓" : "⟳"}</span>
-                            <span className={styles.toolCallName}>{tc.tool}</span>
-                            {tc.args && Object.keys(tc.args).length > 0 && (
-                              <span className={styles.toolCallArgs}>
-                                {Object.values(tc.args).join(", ").slice(0, 80)}
-                              </span>
-                            )}
-                          </div>
-                        ))}
+              {messages.map((message, index) => {
+                const run = message.id ? runsByAssistantMessageId.get(message.id) : undefined;
+                return (
+                  <Fragment key={message.id || `local-${index}`}>
+                    {message.role === "assistant" && run && <RunCard run={run} />}
+                    <div
+                      className={`${styles.message} ${
+                        message.role === "user" ? styles.userMsg : styles.assistantMsg
+                      }`}
+                    >
+                      <div className={styles.msgAvatar}>
+                        {message.role === "user" ? "You" : "解"}
                       </div>
-                    )}
-                    {m.content || (
+                      <div className={styles.msgContent}>
+                        {message.content || (
+                          <span className={styles.thinking}>Thinking…</span>
+                        )}
+                      </div>
+                    </div>
+                  </Fragment>
+                );
+              })}
+
+              {orphanRuns.map((run) => (
+                <Fragment key={`orphan-run-${run.id}`}>
+                  <RunCard run={run} />
+                </Fragment>
+              ))}
+
+              {streamingRun && <RunCard run={streamingRun} live />}
+
+              {(streaming || streamingAssistant) && (
+                <div className={`${styles.message} ${styles.assistantMsg}`}>
+                  <div className={styles.msgAvatar}>解</div>
+                  <div className={styles.msgContent}>
+                    {streamingAssistant || (
                       <span className={styles.thinking}>
-                        {m.toolCalls && m.toolCalls.length > 0
-                          ? "Processing…"
-                          : "Thinking…"}
+                        {streamingRun ? "Processing…" : "Thinking…"}
                       </span>
                     )}
                   </div>
                 </div>
-              ))}
+              )}
+
               <div ref={bottomRef} />
             </div>
           )}
@@ -503,7 +784,7 @@ export default function ChatPage() {
             ref={inputRef}
             className={styles.textarea}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(event) => setInput(event.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Type your message… (Enter to send, Shift+Enter for new line)"
             rows={1}

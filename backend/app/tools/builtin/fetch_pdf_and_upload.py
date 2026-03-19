@@ -18,6 +18,8 @@ class FetchPdfAndUploadTool(BaseTool):
         "run full processing (including OCR when needed), and return a summary. "
         "Use this when you discover a PDF link on the web (e.g.,募集要項)."
     )
+    display_name = "Fetch PDF"
+    activity_label = "Fetching and analyzing PDF"
 
     class Args(BaseModel):
         url: str = Field(

@@ -17,6 +17,8 @@ class LookupSourceTool(BaseTool):
         "Use this before web_fetch to find the correct URL without guessing. "
         "Search by school_id, keyword, or category."
     )
+    display_name = "Lookup Sources"
+    activity_label = "Looking up official sources"
 
     class Args(BaseModel):
         query: Optional[str] = Field(

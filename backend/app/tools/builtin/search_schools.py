@@ -16,6 +16,8 @@ class SearchSchoolsTool(BaseTool):
         "Use this to find school IDs, department IDs, and program IDs needed for question search. "
         "Returns school names (Japanese), departments, and programs."
     )
+    display_name = "Search Schools"
+    activity_label = "Searching schools"
 
     class Args(BaseModel):
         query: Optional[str] = Field(

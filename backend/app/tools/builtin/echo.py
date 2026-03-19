@@ -8,6 +8,8 @@ class EchoTool(BaseTool):
 
     name = "echo"
     description = "Echo back the input message. Useful for testing tool calls."
+    display_name = "Echo"
+    activity_label = "Echoing input"
 
     class Args(BaseModel):
         message: str = Field(description="The message to echo back")

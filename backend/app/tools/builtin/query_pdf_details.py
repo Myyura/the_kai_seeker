@@ -12,6 +12,8 @@ class QueryPdfDetailsTool(BaseTool):
         "Answer detailed questions about an already-processed PDF by returning "
         "relevant snippets with page citations."
     )
+    display_name = "Query PDF"
+    activity_label = "Searching PDF details"
 
     class Args(BaseModel):
         question: str = Field(description="User's detailed question about the PDF content.")

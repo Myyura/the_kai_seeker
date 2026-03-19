@@ -12,6 +12,8 @@ class ProcessAndSummarizePdfTool(BaseTool):
         "Process an uploaded PDF end-to-end (text extraction, image-page OCR if needed) "
         "and return a structured markdown summary."
     )
+    display_name = "Summarize PDF"
+    activity_label = "Analyzing PDF"
 
     class Args(BaseModel):
         pdf_id: int | None = Field(

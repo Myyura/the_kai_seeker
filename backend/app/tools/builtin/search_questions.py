@@ -16,6 +16,8 @@ class SearchQuestionsTool(BaseTool):
         "program_id, year, tags, or keyword. Returns question metadata including title, tags, "
         "and links to full content. Use search_schools first to find valid school/department/program IDs."
     )
+    display_name = "Search Questions"
+    activity_label = "Searching question database"
 
     class Args(BaseModel):
         school_id: Optional[str] = Field(

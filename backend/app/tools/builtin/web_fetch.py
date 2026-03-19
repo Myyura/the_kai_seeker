@@ -69,9 +69,20 @@ class WebFetchTool(BaseTool):
         "Use this to retrieve public information such as school admission pages (募集要項), "
         "program details, exam schedules, and downloadable PDF links."
     )
+    display_name = "Fetch Web Page"
+    activity_label = "Fetching web page"
+    usage_guidelines = [
+        "Only use a URL explicitly provided by the user, returned by lookup_source, or discovered in links/pdf_links from a previous tool result.",
+        "Do not invent, guess, or handcraft adjacent URLs on the same site.",
+    ]
 
     class Args(BaseModel):
-        url: str = Field(description="The full URL to fetch (must start with http:// or https://)")
+        url: str = Field(
+            description=(
+                "The full URL to fetch (must start with http:// or https://). "
+                "This URL must come from the user, lookup_source, or a previously discovered link."
+            )
+        )
 
     async def execute(self, args: Args) -> ToolResult:
         try:

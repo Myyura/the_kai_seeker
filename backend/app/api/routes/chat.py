@@ -9,7 +9,10 @@ from app.db.engine import get_session
 from app.repositories.conversation_repo import ConversationRepository
 from app.schemas.chat import (
     ChatRequest,
+    ChatMessageOut,
     ChatResponseOut,
+    ChatRunEventOut,
+    ChatRunOut,
     ChatSessionDetail,
     ChatSessionOut,
     ChatSessionPdfResourceOut,
@@ -89,7 +92,33 @@ async def get_session_detail(
     chat_session = await repo.get_session(session_id)
     if chat_session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    return ChatSessionDetail.model_validate(chat_session)
+    return ChatSessionDetail(
+        id=chat_session.id,
+        title=chat_session.title,
+        created_at=chat_session.created_at,
+        updated_at=chat_session.updated_at,
+        messages=[ChatMessageOut.model_validate(message) for message in chat_session.messages],
+        runs=[
+            ChatRunOut(
+                id=run.id,
+                assistant_message_id=run.assistant_message_id,
+                status=run.status,
+                created_at=run.created_at,
+                updated_at=run.updated_at,
+                events=[
+                    ChatRunEventOut(
+                        id=event.id,
+                        sequence=event.sequence,
+                        event_type=event.event_type,
+                        payload=json.loads(event.payload),
+                        created_at=event.created_at,
+                    )
+                    for event in run.events
+                ],
+            )
+            for run in chat_session.runs
+        ],
+    )
 
 
 @router.delete("/sessions/{session_id}", status_code=204)

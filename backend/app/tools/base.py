@@ -40,12 +40,19 @@ class BaseTool(ABC):
 
     name: ClassVar[str] = ""
     description: ClassVar[str] = ""
+    display_name: ClassVar[str] = ""
+    activity_label: ClassVar[str] = ""
+    usage_guidelines: ClassVar[list[str]] = []
     Args: ClassVar[type[BaseModel]]
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         if not cls.name:
             cls.name = cls.__name__
+        if not cls.display_name:
+            cls.display_name = cls.name.replace("_", " ").title()
+        if not cls.activity_label:
+            cls.activity_label = cls.display_name
 
     @abstractmethod
     async def execute(self, args: BaseModel) -> ToolResult:
@@ -105,5 +112,8 @@ class BaseTool(ABC):
         return {
             "name": self.name,
             "description": self.description,
+            "display_name": self.display_name,
+            "activity_label": self.activity_label,
+            "usage_guidelines": self.usage_guidelines,
             "parameters": params,
         }

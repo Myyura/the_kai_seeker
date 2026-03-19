@@ -26,6 +26,9 @@ class ChatSession(Base):
     pdf_resources: Mapped[list["ChatSessionPdfResource"]] = relationship(
         back_populates="session", cascade="all, delete-orphan", order_by="ChatSessionPdfResource.id"
     )
+    runs: Mapped[list["ChatRun"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan", order_by="ChatRun.created_at"
+    )
 
 
 class ChatMessage(Base):
@@ -45,6 +48,54 @@ class ChatMessage(Base):
     )
 
     session: Mapped["ChatSession"] = relationship(back_populates="messages")
+    run: Mapped["ChatRun | None"] = relationship(back_populates="assistant_message")
+
+
+class ChatRun(Base):
+    """One assistant run for a user turn, including tool/status events."""
+
+    __tablename__ = "chat_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    session_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    assistant_message_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True, unique=True
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    session: Mapped["ChatSession"] = relationship(back_populates="runs")
+    assistant_message: Mapped["ChatMessage | None"] = relationship(back_populates="run")
+    events: Mapped[list["ChatRunEvent"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan", order_by="ChatRunEvent.sequence"
+    )
+
+
+class ChatRunEvent(Base):
+    """Persisted run event payloads for tool/status history."""
+
+    __tablename__ = "chat_run_events"
+    __table_args__ = (UniqueConstraint("run_id", "sequence", name="uq_run_event_sequence"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("chat_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    run: Mapped["ChatRun"] = relationship(back_populates="events")
 
 
 class ChatSessionPdfResource(Base):

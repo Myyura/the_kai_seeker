@@ -1,3 +1,5 @@
+from typing import Any
+
 from datetime import datetime
 
 from pydantic import BaseModel, Field
@@ -43,6 +45,7 @@ class ChatSessionOut(BaseModel):
 
 class ChatSessionDetail(ChatSessionOut):
     messages: list[ChatMessageOut]
+    runs: list["ChatRunOut"] = Field(default_factory=list)
 
 
 class ChatSessionPdfResourceOut(BaseModel):
@@ -51,3 +54,23 @@ class ChatSessionPdfResourceOut(BaseModel):
     status: str
     source: str
     source_url: str | None = None
+
+
+class ChatRunEventOut(BaseModel):
+    id: int
+    sequence: int
+    event_type: str
+    payload: dict[str, Any]
+    created_at: datetime
+
+
+class ChatRunOut(BaseModel):
+    id: int
+    assistant_message_id: int | None = None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    events: list[ChatRunEventOut] = Field(default_factory=list)
+
+
+ChatSessionDetail.model_rebuild()

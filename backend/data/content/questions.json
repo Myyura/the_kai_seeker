@@ -2940,7 +2940,12 @@
     "title": "京都大学 情報学研究科 通信情報システム専攻 2022年8月実施 専門基礎A \\[A-7\\]",
     "sidebar_label": "2022年8月実施 専門基礎A [A-7]",
     "tags": [
-      "Computer-Architecture"
+      "Computer-Architecture",
+      "Binary-Representation",
+      "Floating-Point-Representation",
+      "IEEE-754",
+      "Addressing-Modes",
+      "Pipeline"
     ],
     "kai_project_path": "kyoto-university/informatics/cce/2023/cce_202208_senmonkiso_A_7.md",
     "kai_project_raw_url": "https://raw.githubusercontent.com/Myyura/the_kai_project/main/docs/kyoto-university/informatics/cce/2023/cce_202208_senmonkiso_A_7.md",
@@ -2963,6 +2968,24 @@
     "kai_project_url": "https://github.com/Myyura/the_kai_project/blob/main/docs/kyoto-university/informatics/cce/2023/cce_202208_senmonkiso_B_4.md"
   },
   {
+    "id": "kyoto-university/informatics/cce/2023/cce_202208_senmonkiso_B_5",
+    "school_id": "kyoto-university",
+    "department_id": "informatics",
+    "program_id": "cce",
+    "year": 2023,
+    "filename": "cce_202208_senmonkiso_B_5",
+    "title": "京都大学 情報学研究科 通信情報システム専攻 2022年8月実施 専門基礎B \\[B-5\\]",
+    "sidebar_label": "2022年8月実施 専門基礎B [B-5]",
+    "tags": [
+      "Computer-Architecture",
+      "Cache",
+      "Branch-Prediction"
+    ],
+    "kai_project_path": "kyoto-university/informatics/cce/2023/cce_202208_senmonkiso_B_5.md",
+    "kai_project_raw_url": "https://raw.githubusercontent.com/Myyura/the_kai_project/main/docs/kyoto-university/informatics/cce/2023/cce_202208_senmonkiso_B_5.md",
+    "kai_project_url": "https://github.com/Myyura/the_kai_project/blob/main/docs/kyoto-university/informatics/cce/2023/cce_202208_senmonkiso_B_5.md"
+  },
+  {
     "id": "kyoto-university/informatics/cce/2024/cce_202308_senmonkiso_A_1",
     "school_id": "kyoto-university",
     "department_id": "informatics",
@@ -2971,10 +2994,74 @@
     "filename": "cce_202308_senmonkiso_A_1",
     "title": "京都大学 情報学研究科 通信情報システム専攻 2023年8月実施 専門基礎A \\[A-1\\]",
     "sidebar_label": "2023年8月実施 専門基礎A [A-1]",
-    "tags": [],
+    "tags": [
+      "Calculus",
+      "Linear-Algebra"
+    ],
     "kai_project_path": "kyoto-university/informatics/cce/2024/cce_202308_senmonkiso_A_1.md",
     "kai_project_raw_url": "https://raw.githubusercontent.com/Myyura/the_kai_project/main/docs/kyoto-university/informatics/cce/2024/cce_202308_senmonkiso_A_1.md",
     "kai_project_url": "https://github.com/Myyura/the_kai_project/blob/main/docs/kyoto-university/informatics/cce/2024/cce_202308_senmonkiso_A_1.md"
+  },
+  {
+    "id": "kyoto-university/informatics/cce/2024/cce_202308_senmonkiso_A_2",
+    "school_id": "kyoto-university",
+    "department_id": "informatics",
+    "program_id": "cce",
+    "year": 2024,
+    "filename": "cce_202308_senmonkiso_A_2",
+    "title": "京都大学 情報学研究科 通信情報システム専攻 2023年8月実施 専門基礎A \\[A-2\\]",
+    "sidebar_label": "2023年8月実施 専門基礎A [A-2]",
+    "tags": [
+      "Digital-Circuit",
+      "Logic-Design",
+      "Sequential-Circuit",
+      "Moore-Machine",
+      "Mealy-Machine"
+    ],
+    "kai_project_path": "kyoto-university/informatics/cce/2024/cce_202308_senmonkiso_A_2.md",
+    "kai_project_raw_url": "https://raw.githubusercontent.com/Myyura/the_kai_project/main/docs/kyoto-university/informatics/cce/2024/cce_202308_senmonkiso_A_2.md",
+    "kai_project_url": "https://github.com/Myyura/the_kai_project/blob/main/docs/kyoto-university/informatics/cce/2024/cce_202308_senmonkiso_A_2.md"
+  },
+  {
+    "id": "kyoto-university/informatics/cce/2024/cce_202308_senmonkiso_A_3",
+    "school_id": "kyoto-university",
+    "department_id": "informatics",
+    "program_id": "cce",
+    "year": 2024,
+    "filename": "cce_202308_senmonkiso_A_3",
+    "title": "京都大学 情報学研究科 通信情報システム専攻 2023年8月実施 専門基礎A \\[A-3\\]",
+    "sidebar_label": "2023年8月実施 専門基礎A [A-3]",
+    "tags": [
+      "Information-Theory",
+      "Source-Coding",
+      "Huffman-Coding",
+      "Channel-Coding",
+      "Cyclic-Code"
+    ],
+    "kai_project_path": "kyoto-university/informatics/cce/2024/cce_202308_senmonkiso_A_3.md",
+    "kai_project_raw_url": "https://raw.githubusercontent.com/Myyura/the_kai_project/main/docs/kyoto-university/informatics/cce/2024/cce_202308_senmonkiso_A_3.md",
+    "kai_project_url": "https://github.com/Myyura/the_kai_project/blob/main/docs/kyoto-university/informatics/cce/2024/cce_202308_senmonkiso_A_3.md"
+  },
+  {
+    "id": "kyoto-university/informatics/cce/2024/cce_202308_senmonkiso_A_4",
+    "school_id": "kyoto-university",
+    "department_id": "informatics",
+    "program_id": "cce",
+    "year": 2024,
+    "filename": "cce_202308_senmonkiso_A_4",
+    "title": "京都大学 情報学研究科 通信情報システム専攻 2023年8月実施 専門基礎A \\[A-4\\]",
+    "sidebar_label": "2023年8月実施 専門基礎A [A-4]",
+    "tags": [
+      "Computer-Architecture",
+      "Floating-Point-Representation",
+      "IEEE-754",
+      "Pipeline",
+      "Branch-Prediction",
+      "Control-Hazard"
+    ],
+    "kai_project_path": "kyoto-university/informatics/cce/2024/cce_202308_senmonkiso_A_4.md",
+    "kai_project_raw_url": "https://raw.githubusercontent.com/Myyura/the_kai_project/main/docs/kyoto-university/informatics/cce/2024/cce_202308_senmonkiso_A_4.md",
+    "kai_project_url": "https://github.com/Myyura/the_kai_project/blob/main/docs/kyoto-university/informatics/cce/2024/cce_202308_senmonkiso_A_4.md"
   },
   {
     "id": "kyoto-university/informatics/cce/2024/cce_202402_senmonkiso_A_1",
@@ -2985,7 +3072,10 @@
     "filename": "cce_202402_senmonkiso_A_1",
     "title": "京都大学 情報学研究科 通信情報システム専攻 2024年2月実施 専門基礎A \\[A-1\\]",
     "sidebar_label": "2024年2月実施 専門基礎A [A-1]",
-    "tags": [],
+    "tags": [
+      "Calculus",
+      "Linear-Algebra"
+    ],
     "kai_project_path": "kyoto-university/informatics/cce/2024/cce_202402_senmonkiso_A_1.md",
     "kai_project_raw_url": "https://raw.githubusercontent.com/Myyura/the_kai_project/main/docs/kyoto-university/informatics/cce/2024/cce_202402_senmonkiso_A_1.md",
     "kai_project_url": "https://github.com/Myyura/the_kai_project/blob/main/docs/kyoto-university/informatics/cce/2024/cce_202402_senmonkiso_A_1.md"
@@ -2999,10 +3089,52 @@
     "filename": "cce_202408_senmonkiso_A_1",
     "title": "京都大学 情報学研究科 通信情報システム専攻 2024年8月実施 専門基礎A \\[A-1\\]",
     "sidebar_label": "2024年8月実施 専門基礎A [A-1]",
-    "tags": [],
+    "tags": [
+      "Calculus",
+      "Linear-Algebra"
+    ],
     "kai_project_path": "kyoto-university/informatics/cce/2025/cce_202408_senmonkiso_A_1.md",
     "kai_project_raw_url": "https://raw.githubusercontent.com/Myyura/the_kai_project/main/docs/kyoto-university/informatics/cce/2025/cce_202408_senmonkiso_A_1.md",
     "kai_project_url": "https://github.com/Myyura/the_kai_project/blob/main/docs/kyoto-university/informatics/cce/2025/cce_202408_senmonkiso_A_1.md"
+  },
+  {
+    "id": "kyoto-university/informatics/cce/2025/cce_202408_senmonkiso_A_2",
+    "school_id": "kyoto-university",
+    "department_id": "informatics",
+    "program_id": "cce",
+    "year": 2025,
+    "filename": "cce_202408_senmonkiso_A_2",
+    "title": "京都大学 情報学研究科 通信情報システム専攻 2024年8月実施 専門基礎A \\[A-2\\]",
+    "sidebar_label": "2024年8月実施 専門基礎A [A-2]",
+    "tags": [
+      "Digital-Circuit",
+      "Logic-Design",
+      "Moore-Machine"
+    ],
+    "kai_project_path": "kyoto-university/informatics/cce/2025/cce_202408_senmonkiso_A_2.md",
+    "kai_project_raw_url": "https://raw.githubusercontent.com/Myyura/the_kai_project/main/docs/kyoto-university/informatics/cce/2025/cce_202408_senmonkiso_A_2.md",
+    "kai_project_url": "https://github.com/Myyura/the_kai_project/blob/main/docs/kyoto-university/informatics/cce/2025/cce_202408_senmonkiso_A_2.md"
+  },
+  {
+    "id": "kyoto-university/informatics/cce/2025/cce_202408_senmonkiso_A_3",
+    "school_id": "kyoto-university",
+    "department_id": "informatics",
+    "program_id": "cce",
+    "year": 2025,
+    "filename": "cce_202408_senmonkiso_A_3",
+    "title": "京都大学 情報学研究科 通信情報システム専攻 2024年8月実施 専門基礎A \\[A-3\\]",
+    "sidebar_label": "2024年8月実施 専門基礎A [A-3]",
+    "tags": [
+      "Information-Theory",
+      "Entropy",
+      "Mutual-Information",
+      "Markov-Source",
+      "Additive-Binary-Channel",
+      "Channel-Capacity"
+    ],
+    "kai_project_path": "kyoto-university/informatics/cce/2025/cce_202408_senmonkiso_A_3.md",
+    "kai_project_raw_url": "https://raw.githubusercontent.com/Myyura/the_kai_project/main/docs/kyoto-university/informatics/cce/2025/cce_202408_senmonkiso_A_3.md",
+    "kai_project_url": "https://github.com/Myyura/the_kai_project/blob/main/docs/kyoto-university/informatics/cce/2025/cce_202408_senmonkiso_A_3.md"
   },
   {
     "id": "kyoto-university/informatics/ist/2018/ist_201802_kiso_f1",

@@ -38,6 +38,7 @@ FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)", re.DOTALL)
 @dataclass
 class Skill:
     name: str
+    display_name: str
     description: str
     body: str
     trigger: str = ""
@@ -49,6 +50,7 @@ class Skill:
     def schema(self) -> dict:
         return {
             "name": self.name,
+            "display_name": self.display_name,
             "description": self.description,
             "trigger": self.trigger,
             "allowed_tools": self.allowed_tools,
@@ -125,6 +127,14 @@ def _parse_yaml_simple(text: str) -> dict:
     return result
 
 
+def _extract_heading_title(text: str) -> str | None:
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("# "):
+            return stripped[2:].strip()
+    return None
+
+
 def parse_skill_file(path: Path, source: str = "builtin") -> Skill | None:
     """Parse a SKILL.md file into a Skill object."""
     try:
@@ -148,6 +158,12 @@ def parse_skill_file(path: Path, source: str = "builtin") -> Skill | None:
     if not name or not description:
         logger.warning("Skill in %s missing required 'name' or 'description'", path)
         return None
+    display_name = (
+        fm.get("display-name")
+        or fm.get("display_name")
+        or _extract_heading_title(body)
+        or name
+    )
 
     allowed_tools_raw = fm.get("allowed-tools") or fm.get("allowed_tools", "")
     if isinstance(allowed_tools_raw, str):
@@ -164,6 +180,7 @@ def parse_skill_file(path: Path, source: str = "builtin") -> Skill | None:
 
     return Skill(
         name=name,
+        display_name=display_name,
         description=description,
         body=body,
         trigger=trigger,

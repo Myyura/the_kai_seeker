@@ -2,9 +2,15 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
+from app.content_sync import content_sync_registry
+from app.schemas.content import (
+    ContentSyncRequest,
+    ContentSyncResultOut,
+    ContentSyncSourceOut,
+    ContentSyncSourcesOut,
+)
 from app.services.content_index import content_index
 from app.services.domain_config import domain_config
-from app.services.sync_service import sync_from_github
 
 logger = logging.getLogger(__name__)
 
@@ -69,11 +75,35 @@ async def content_stats() -> dict:
     }
 
 
-@router.post("/sync")
-async def sync_content() -> dict:
+@router.get("/sync/sources", response_model=ContentSyncSourcesOut)
+async def list_sync_sources() -> ContentSyncSourcesOut:
+    sources = [ContentSyncSourceOut.model_validate(source.schema()) for source in content_sync_registry.list_all()]
+    default_source = content_sync_registry.get_default()
+    return ContentSyncSourcesOut(
+        sources=sources,
+        default_source_id=default_source.id if default_source else None,
+    )
+
+
+@router.post("/sync", response_model=ContentSyncResultOut)
+async def sync_content(req: ContentSyncRequest | None = None) -> ContentSyncResultOut:
+    request = req or ContentSyncRequest()
+    source = (
+        content_sync_registry.get(request.source_id)
+        if request.source_id
+        else content_sync_registry.get_default()
+    )
+    if source is None:
+        raise HTTPException(status_code=400, detail="Content sync source not found")
+    if not source.enabled:
+        raise HTTPException(status_code=400, detail="Content sync source is disabled")
+
     try:
-        result = await sync_from_github()
-        return result
+        result = await source.sync(request.options)
+        return ContentSyncResultOut.model_validate({
+            **result,
+            "source_id": source.id,
+        })
     except Exception as e:
         logger.exception("Sync failed")
         raise HTTPException(status_code=500, detail=f"Sync failed: {e}")

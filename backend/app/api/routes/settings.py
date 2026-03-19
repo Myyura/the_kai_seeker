@@ -23,15 +23,19 @@ async def list_extensions() -> dict:
         s = t.schema()
         tools.append({
             "name": s["name"],
+            "display_name": s.get("display_name", s["name"]),
             "description": s["description"],
+            "activity_label": s.get("activity_label", ""),
             "type": "tool",
             "parameters": s.get("parameters", []),
+            "usage_guidelines": s.get("usage_guidelines", []),
         })
 
     skills = []
     for sk in skill_registry.list_all():
         skills.append({
             "name": sk.name,
+            "display_name": sk.display_name,
             "description": sk.description,
             "type": "skill",
             "source": sk.source,

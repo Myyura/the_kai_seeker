@@ -1,10 +1,13 @@
 .container {
-  max-width: 800px;
-  margin: 0 auto;
+  width: 100%;
 }
 
-.heading {
-  font-size: 1.5rem;
+.pageIntro {
+  margin-bottom: 24px;
+}
+
+.pageTitle {
+  font-size: 1.35rem;
   font-weight: 700;
   margin-bottom: 8px;
 }
@@ -13,7 +16,7 @@
   color: var(--color-text-secondary);
   font-size: 0.95rem;
   line-height: 1.6;
-  margin-bottom: 24px;
+  margin-bottom: 0;
 }
 
 .section {
@@ -89,6 +92,44 @@
 .muted {
   color: var(--color-text-muted);
   font-size: 0.95rem;
+}
+
+.overviewGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.overviewCard {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.overviewCard:hover {
+  transform: translateY(-2px);
+}
+
+.overviewMeta {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+.overviewTitle {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.overviewDesc {
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+  line-height: 1.55;
 }
 
 .providerList {
@@ -211,6 +252,12 @@
   font-weight: 500;
 }
 
+.inlineMeta {
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
 .link {
   color: var(--color-primary);
   text-decoration: underline;
@@ -253,7 +300,6 @@
 .extName {
   font-weight: 600;
   font-size: 0.95rem;
-  font-family: var(--font-mono, monospace);
 }
 
 .extBadge {

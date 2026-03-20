@@ -109,6 +109,75 @@ class PdfService:
             "snippets": snippets,
         }
 
+    async def list_admin_documents(
+        self,
+        *,
+        query: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        return await self.repo.list_documents(query=query, status=status, limit=limit)
+
+    async def get_admin_document_detail(self, pdf_id: int) -> dict:
+        doc = await self.repo.get_document(pdf_id, with_chunks=True)
+        if doc is None:
+            raise ValueError(f"PDF not found: {pdf_id}")
+
+        references = await self.repo.list_document_references(pdf_id)
+        extracted_text = doc.extracted_text or ""
+
+        return {
+            "id": doc.id,
+            "filename": doc.filename,
+            "status": doc.status,
+            "storage_path": doc.storage_path,
+            "storage_exists": Path(doc.storage_path).exists(),
+            "summary_markdown": doc.summary_markdown,
+            "extracted_text_preview": self._preview_text(extracted_text, limit=3000),
+            "extracted_text_length": len(extracted_text),
+            "chunk_count": len(doc.chunks),
+            "referenced_sessions": references,
+            "created_at": doc.created_at,
+            "updated_at": doc.updated_at,
+        }
+
+    async def get_admin_document_chunks(self, pdf_id: int, limit: int = 40) -> dict:
+        doc = await self.repo.get_document(pdf_id)
+        if doc is None:
+            raise ValueError(f"PDF not found: {pdf_id}")
+
+        chunks = await self.repo.search_chunks(pdf_id)
+        selected = chunks[:limit]
+        return {
+            "pdf_id": pdf_id,
+            "count": len(chunks),
+            "chunks": [
+                {
+                    "id": chunk.id,
+                    "page_number": chunk.page_number,
+                    "content_preview": self._preview_text(chunk.content, limit=500),
+                    "content_length": len(chunk.content),
+                }
+                for chunk in selected
+            ],
+        }
+
+    async def delete_document(self, pdf_id: int) -> None:
+        doc = await self.repo.get_document(pdf_id)
+        if doc is None:
+            raise ValueError(f"PDF not found: {pdf_id}")
+
+        storage_path = Path(doc.storage_path)
+        deleted = await self.repo.delete_document(pdf_id)
+        if not deleted:
+            raise ValueError(f"PDF not found: {pdf_id}")
+
+        try:
+            if storage_path.exists():
+                storage_path.unlink()
+        except OSError as exc:
+            logger.warning("Failed to remove PDF file %s: %s", storage_path, exc)
+
     def _extract_pages(self, pdf_path: Path) -> list[dict]:
         try:
             import fitz  # type: ignore
@@ -259,3 +328,9 @@ class PdfService:
     def _tokenize(text: str) -> set[str]:
         tokens = re.findall(r"[\w\u3040-\u30ff\u4e00-\u9fff]+", text.lower())
         return {t for t in tokens if len(t) >= 2}
+
+    @staticmethod
+    def _preview_text(text: str, limit: int = 500) -> str:
+        if len(text) <= limit:
+            return text
+        return text[:limit] + "…"

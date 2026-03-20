@@ -205,7 +205,6 @@ export default function SettingsProvidersPage() {
                   </span>
                   <span className={styles.providerMeta}>
                     {provider.model ?? "default model"}
-                    {provider.base_url ? ` · ${provider.base_url}` : ""}
                   </span>
                 </div>
                 <div className={styles.providerActions}>

@@ -202,14 +202,25 @@
   background: var(--card-bg);
 }
 
+.btnSmall:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .btnSmall:hover {
   border-color: var(--color-primary);
   color: var(--color-primary);
 }
 
+.btnDanger {
+  color: #e53e3e;
+  border-color: rgba(229, 62, 62, 0.3);
+}
+
 .btnDanger:hover {
   border-color: #e53e3e;
   color: #e53e3e;
+  background: rgba(229, 62, 62, 0.06);
 }
 
 .syncCard {

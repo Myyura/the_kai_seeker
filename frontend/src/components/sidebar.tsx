@@ -10,6 +10,7 @@ const navItems = [
   { href: "/schools/", label: "Schools", icon: "🏫" },
   { href: "/practice/", label: "Practice", icon: "📝" },
   { href: "/review/", label: "Review", icon: "📊" },
+  { href: "/data/", label: "Data", icon: "🗂️" },
   { href: "/settings/", label: "Settings", icon: "⚙️" },
 ];
 

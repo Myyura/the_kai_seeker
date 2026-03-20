@@ -34,6 +34,26 @@ class ProviderRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_admin(
+        self,
+        *,
+        query: str | None = None,
+        limit: int = 100,
+    ) -> list[ProviderSetting]:
+        stmt = (
+            select(ProviderSetting)
+            .order_by(ProviderSetting.updated_at.desc(), ProviderSetting.id.desc())
+            .limit(limit)
+        )
+        if query:
+            stmt = stmt.where(
+                ProviderSetting.provider.ilike(f"%{query}%")
+                | ProviderSetting.model.ilike(f"%{query}%")
+                | ProviderSetting.base_url.ilike(f"%{query}%")
+            )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def update(
         self, provider_id: int, data: ProviderSettingUpdate
     ) -> ProviderSetting | None:

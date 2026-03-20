@@ -1,7 +1,8 @@
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.conversation import ChatSession, ChatSessionPdfResource
 from app.models.pdf_document import PdfChunk, PdfDocument
 
 
@@ -26,6 +27,68 @@ class PdfRepository:
             result = await self.session.execute(stmt)
             return result.scalar_one_or_none()
         return await self.session.get(PdfDocument, document_id)
+
+    async def list_documents(
+        self,
+        *,
+        query: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        chunk_counts = (
+            select(
+                PdfChunk.document_id.label("pdf_id"),
+                func.count(PdfChunk.id).label("chunk_count"),
+            )
+            .group_by(PdfChunk.document_id)
+            .subquery()
+        )
+        reference_counts = (
+            select(
+                ChatSessionPdfResource.pdf_id.label("pdf_id"),
+                func.count(func.distinct(ChatSessionPdfResource.session_id)).label(
+                    "referenced_session_count"
+                ),
+            )
+            .group_by(ChatSessionPdfResource.pdf_id)
+            .subquery()
+        )
+
+        stmt = (
+            select(
+                PdfDocument,
+                func.coalesce(chunk_counts.c.chunk_count, 0).label("chunk_count"),
+                func.coalesce(
+                    reference_counts.c.referenced_session_count, 0
+                ).label("referenced_session_count"),
+            )
+            .outerjoin(chunk_counts, chunk_counts.c.pdf_id == PdfDocument.id)
+            .outerjoin(reference_counts, reference_counts.c.pdf_id == PdfDocument.id)
+            .order_by(PdfDocument.updated_at.desc(), PdfDocument.id.desc())
+            .limit(limit)
+        )
+
+        if query:
+            stmt = stmt.where(PdfDocument.filename.ilike(f"%{query}%"))
+        if status:
+            stmt = stmt.where(PdfDocument.status == status)
+
+        result = await self.session.execute(stmt)
+        rows = result.all()
+        return [
+            {
+                "id": doc.id,
+                "filename": doc.filename,
+                "status": doc.status,
+                "summary_available": bool(doc.summary_markdown),
+                "extracted_text_length": len(doc.extracted_text or ""),
+                "chunk_count": int(chunk_count or 0),
+                "referenced_session_count": int(referenced_session_count or 0),
+                "created_at": doc.created_at,
+                "updated_at": doc.updated_at,
+            }
+            for doc, chunk_count, referenced_session_count in rows
+        ]
 
     async def update_document(
         self,
@@ -62,3 +125,31 @@ class PdfRepository:
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def list_document_references(self, document_id: int) -> list[dict]:
+        stmt = (
+            select(ChatSessionPdfResource, ChatSession)
+            .join(ChatSession, ChatSession.id == ChatSessionPdfResource.session_id)
+            .where(ChatSessionPdfResource.pdf_id == document_id)
+            .order_by(ChatSession.updated_at.desc(), ChatSession.id.desc())
+        )
+        result = await self.session.execute(stmt)
+        rows = result.all()
+        return [
+            {
+                "session_id": session.id,
+                "session_title": session.title,
+                "source_type": resource.source_type,
+                "source_url": resource.source_url,
+                "attached_at": resource.created_at,
+            }
+            for resource, session in rows
+        ]
+
+    async def delete_document(self, document_id: int) -> bool:
+        doc = await self.get_document(document_id)
+        if doc is None:
+            return False
+        await self.session.delete(doc)
+        await self.session.commit()
+        return True

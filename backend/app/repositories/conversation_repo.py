@@ -1,6 +1,6 @@
 import json
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -29,6 +29,68 @@ class ConversationRepository:
         stmt = select(ChatSession).order_by(ChatSession.updated_at.desc())
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def list_sessions_admin(
+        self,
+        *,
+        query: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        message_counts = (
+            select(
+                ChatMessage.session_id.label("session_id"),
+                func.count(ChatMessage.id).label("message_count"),
+            )
+            .group_by(ChatMessage.session_id)
+            .subquery()
+        )
+        run_counts = (
+            select(
+                ChatRun.session_id.label("session_id"),
+                func.count(ChatRun.id).label("run_count"),
+            )
+            .group_by(ChatRun.session_id)
+            .subquery()
+        )
+        pdf_counts = (
+            select(
+                ChatSessionPdfResource.session_id.label("session_id"),
+                func.count(ChatSessionPdfResource.id).label("pdf_count"),
+            )
+            .group_by(ChatSessionPdfResource.session_id)
+            .subquery()
+        )
+
+        stmt = (
+            select(
+                ChatSession,
+                func.coalesce(message_counts.c.message_count, 0).label("message_count"),
+                func.coalesce(run_counts.c.run_count, 0).label("run_count"),
+                func.coalesce(pdf_counts.c.pdf_count, 0).label("pdf_count"),
+            )
+            .outerjoin(message_counts, message_counts.c.session_id == ChatSession.id)
+            .outerjoin(run_counts, run_counts.c.session_id == ChatSession.id)
+            .outerjoin(pdf_counts, pdf_counts.c.session_id == ChatSession.id)
+            .order_by(ChatSession.updated_at.desc(), ChatSession.id.desc())
+            .limit(limit)
+        )
+        if query:
+            stmt = stmt.where(ChatSession.title.ilike(f"%{query}%"))
+
+        result = await self.session.execute(stmt)
+        rows = result.all()
+        return [
+            {
+                "id": chat_session.id,
+                "title": chat_session.title,
+                "message_count": int(message_count or 0),
+                "run_count": int(run_count or 0),
+                "pdf_count": int(pdf_count or 0),
+                "created_at": chat_session.created_at,
+                "updated_at": chat_session.updated_at,
+            }
+            for chat_session, message_count, run_count, pdf_count in rows
+        ]
 
     async def get_session(self, session_id: int) -> ChatSession | None:
         stmt = (

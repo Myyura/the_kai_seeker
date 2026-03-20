@@ -208,7 +208,14 @@
 
 .pdfLayout {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) 380px;
+  grid-template-columns: minmax(280px, 0.82fr) minmax(0, 1.38fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.conversationLayout {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
   gap: 18px;
   align-items: start;
 }
@@ -216,6 +223,7 @@
 .listCard,
 .detailCard {
   padding: 16px;
+  min-width: 0;
 }
 
 .listHeader {
@@ -421,12 +429,81 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-width: 0;
 }
 
 .detailActions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.tabBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tabButton {
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  transition: var(--transition-fast);
+}
+
+.tabButton:hover {
+  border-color: rgba(46, 133, 85, 0.35);
+  color: var(--color-primary);
+}
+
+.tabButtonActive {
+  border-color: rgba(46, 133, 85, 0.45);
+  background: rgba(46, 133, 85, 0.08);
+  color: var(--color-primary);
+}
+
+.tabPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.summaryCard {
+  padding: 12px;
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--card-border);
+}
+
+.summaryLabel {
+  margin-bottom: 8px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.summaryValue {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.stateGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
 }
 
 .detailMeta {
@@ -508,6 +585,101 @@
   word-break: break-word;
 }
 
+.referenceBody {
+  margin-top: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+}
+
+.eventList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.eventItem {
+  padding: 12px;
+  border-radius: var(--radius-xs);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+}
+
+.eventHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.eventTitle {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  word-break: break-word;
+}
+
+.eventMeta {
+  flex-shrink: 0;
+  font-size: 0.76rem;
+  color: var(--color-text-muted);
+}
+
+.eventBody {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+}
+
+.eventSubsection {
+  margin-top: 10px;
+}
+
+.eventSubsectionLabel {
+  margin-bottom: 6px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+}
+
+.rawDetails {
+  margin-top: 10px;
+}
+
+.rawSummary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  list-style: none;
+}
+
+.rawSummary::-webkit-details-marker {
+  display: none;
+}
+
+.rawPre {
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--card-border);
+  background: rgba(13, 20, 24, 0.04);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+  overflow: auto;
+}
+
 .emptyState {
   padding: 18px;
   border: 1px dashed var(--card-border);
@@ -518,6 +690,10 @@
 
 @media (max-width: 1100px) {
   .pdfLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .conversationLayout {
     grid-template-columns: 1fr;
   }
 

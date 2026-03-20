@@ -6,7 +6,7 @@ from pathlib import Path
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.providers.base import ChatMessage
+from app.providers.base import ProviderMessage
 from app.providers.factory import create_provider
 from app.repositories.pdf_repo import PdfRepository
 from app.repositories.provider_repo import ProviderRepository
@@ -31,7 +31,11 @@ class PdfService:
 
     async def save_upload(self, filename: str, content: bytes) -> dict:
         temp_path = str(self.upload_dir / f"tmp_{filename}")
-        doc = await self.repo.create_document(filename=filename, storage_path=temp_path, status="uploaded")
+        doc = await self.repo.create_document(
+            filename=filename,
+            storage_path=temp_path,
+            status="uploaded",
+        )
         final_path = self.upload_dir / f"{doc.id}.pdf"
         final_path.write_bytes(content)
         await self.repo.update_document(doc.id, status="uploaded")
@@ -61,7 +65,9 @@ class PdfService:
                 if page in ocr_map and ocr_map[page].strip():
                     page_data["text"] = (page_data["text"] + "\n" + ocr_map[page]).strip()
 
-        full_text = "\n\n".join([f"[Page {p['page']}]\n{p['text']}" for p in pages if p["text"].strip()])
+        full_text = "\n\n".join(
+            [f"[Page {p['page']}]\n{p['text']}" for p in pages if p["text"].strip()]
+        )
         chunks = self._build_chunks(pages)
         await self.repo.replace_chunks(pdf_id, chunks)
 
@@ -85,7 +91,10 @@ class PdfService:
         if doc is None:
             raise ValueError(f"PDF not found: {pdf_id}")
         if not doc.chunks:
-            raise ValueError("PDF has not been processed yet. Please run process_and_summarize_pdf first.")
+            raise ValueError(
+                "PDF has not been processed yet. "
+                "Please run process_and_summarize_pdf first."
+            )
 
         q_tokens = self._tokenize(question)
         scored: list[tuple[float, int, str]] = []
@@ -204,7 +213,13 @@ class PdfService:
         pages: list[dict] = []
         for idx, page in enumerate(reader.pages, start=1):
             text = (page.extract_text() or "").strip()
-            pages.append({"page": idx, "text": text, "is_image_page": len(text) < MIN_TEXT_LEN_FOR_TEXT_PAGE})
+            pages.append(
+                {
+                    "page": idx,
+                    "text": text,
+                    "is_image_page": len(text) < MIN_TEXT_LEN_FOR_TEXT_PAGE,
+                }
+            )
         return pages
 
     async def _ocr_image_pages(self, pdf_path: Path, image_pages: list[int]) -> dict[int, str]:
@@ -241,8 +256,14 @@ class PdfService:
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": "Extract all visible text and tables from this page."},
-                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                            {
+                                "type": "text",
+                                "text": "Extract all visible text and tables from this page.",
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{b64}"},
+                            },
                         ],
                     }
                 ],
@@ -287,8 +308,8 @@ class PdfService:
 
         try:
             response = await provider.chat([
-                ChatMessage(role="system", content="You are a precise document summarizer."),
-                ChatMessage(role="user", content=f"{prompt}\n\n{truncated}"),
+                ProviderMessage(role="system", content="You are a precise document summarizer."),
+                ProviderMessage(role="user", content=f"{prompt}\n\n{truncated}"),
             ])
             return response.content.strip() or self._fallback_summary(full_text)
         except Exception:

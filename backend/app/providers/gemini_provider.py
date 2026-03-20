@@ -4,7 +4,7 @@ from typing import AsyncIterator
 
 import httpx
 
-from app.providers.base import BaseLLMProvider, ChatMessage, ChatResponse
+from app.providers.base import BaseLLMProvider, ChatResponse, ProviderMessage
 
 logger = logging.getLogger(__name__)
 
@@ -22,18 +22,18 @@ class GeminiProvider(BaseLLMProvider):
         self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.model = model or DEFAULT_MODEL
 
-    def _build_contents(self, messages: list[ChatMessage]) -> tuple[list[dict], str | None]:
-        """Convert ChatMessages into Gemini contents format.
+    def _build_contents(self, messages: list[ProviderMessage]) -> tuple[list[dict], str | None]:
+        """Convert provider messages into Gemini contents format.
 
         Returns (contents, system_instruction_text).
         Gemini uses 'user'/'model' roles and handles system instructions separately.
         """
-        system_text = None
+        system_parts: list[str] = []
         contents: list[dict] = []
 
         for m in messages:
             if m.role == "system":
-                system_text = m.content
+                system_parts.append(m.content)
                 continue
             role = ROLE_MAP.get(m.role, "user")
             contents.append({
@@ -41,16 +41,17 @@ class GeminiProvider(BaseLLMProvider):
                 "parts": [{"text": m.content}],
             })
 
+        system_text = "\n\n".join(part for part in system_parts if part.strip()) or None
         return contents, system_text
 
-    def _build_body(self, messages: list[ChatMessage]) -> dict:
+    def _build_body(self, messages: list[ProviderMessage]) -> dict:
         contents, system_text = self._build_contents(messages)
         body: dict = {"contents": contents}
         if system_text:
             body["systemInstruction"] = {"parts": [{"text": system_text}]}
         return body
 
-    async def chat(self, messages: list[ChatMessage]) -> ChatResponse:
+    async def chat(self, messages: list[ProviderMessage]) -> ChatResponse:
         url = f"{self.base_url}/models/{self.model}:generateContent?key={self.api_key}"
         body = self._build_body(messages)
 
@@ -73,7 +74,7 @@ class GeminiProvider(BaseLLMProvider):
             usage=usage,
         )
 
-    async def chat_stream(self, messages: list[ChatMessage]) -> AsyncIterator[str]:
+    async def chat_stream(self, messages: list[ProviderMessage]) -> AsyncIterator[str]:
         url = (
             f"{self.base_url}/models/{self.model}:streamGenerateContent"
             f"?alt=sse&key={self.api_key}"
@@ -107,7 +108,7 @@ class GeminiProvider(BaseLLMProvider):
 
     async def test_connection(self) -> bool:
         try:
-            test_messages = [ChatMessage(role="user", content="Hi")]
+            test_messages = [ProviderMessage(role="user", content="Hi")]
             response = await self.chat(test_messages)
             return bool(response.content)
         except Exception:

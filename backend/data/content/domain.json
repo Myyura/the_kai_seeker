@@ -24,5 +24,6 @@
     "Use lookup_source to find official school URLs for admission info",
     "Explain or solve the question for the user"
   ],
+  "recent_message_window": 8,
   "max_tool_turns": 20
 }

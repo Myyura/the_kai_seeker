@@ -8,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.engine import get_session
 from app.repositories.conversation_repo import ConversationRepository
 from app.schemas.chat import (
-    ChatRequest,
     ChatMessageOut,
+    ChatRequest,
     ChatResponseOut,
     ChatRunEventOut,
     ChatRunOut,
@@ -118,6 +118,7 @@ async def get_session_detail(
             )
             for run in chat_session.runs
         ],
+        state=json.loads(chat_session.state.payload) if chat_session.state is not None else {},
     )
 
 

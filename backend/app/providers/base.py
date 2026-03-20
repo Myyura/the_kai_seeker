@@ -10,7 +10,7 @@ from typing import AsyncIterator
 
 
 @dataclass
-class ChatMessage:
+class ProviderMessage:
     role: str  # "system" | "user" | "assistant"
     content: str
 
@@ -31,11 +31,11 @@ class BaseLLMProvider(ABC):
         self.model = model
 
     @abstractmethod
-    async def chat(self, messages: list[ChatMessage]) -> ChatResponse:
+    async def chat(self, messages: list[ProviderMessage]) -> ChatResponse:
         """Send messages and get a complete response."""
 
     @abstractmethod
-    async def chat_stream(self, messages: list[ChatMessage]) -> AsyncIterator[str]:
+    async def chat_stream(self, messages: list[ProviderMessage]) -> AsyncIterator[str]:
         """Send messages and stream the response token by token."""
 
     @abstractmethod

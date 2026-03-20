@@ -4,7 +4,7 @@ from typing import AsyncIterator
 
 import httpx
 
-from app.providers.base import BaseLLMProvider, ChatMessage, ChatResponse
+from app.providers.base import BaseLLMProvider, ChatResponse, ProviderMessage
 
 logger = logging.getLogger(__name__)
 
@@ -26,14 +26,14 @@ class OpenAIProvider(BaseLLMProvider):
             "Content-Type": "application/json",
         }
 
-    def _build_body(self, messages: list[ChatMessage], stream: bool = False) -> dict:
+    def _build_body(self, messages: list[ProviderMessage], stream: bool = False) -> dict:
         return {
             "model": self.model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
             "stream": stream,
         }
 
-    async def chat(self, messages: list[ChatMessage]) -> ChatResponse:
+    async def chat(self, messages: list[ProviderMessage]) -> ChatResponse:
         url = f"{self.base_url}/chat/completions"
         body = self._build_body(messages, stream=False)
 
@@ -49,7 +49,7 @@ class OpenAIProvider(BaseLLMProvider):
             usage=data.get("usage"),
         )
 
-    async def chat_stream(self, messages: list[ChatMessage]) -> AsyncIterator[str]:
+    async def chat_stream(self, messages: list[ProviderMessage]) -> AsyncIterator[str]:
         url = f"{self.base_url}/chat/completions"
         body = self._build_body(messages, stream=True)
 
@@ -80,7 +80,7 @@ class OpenAIProvider(BaseLLMProvider):
 
     async def test_connection(self) -> bool:
         try:
-            test_messages = [ChatMessage(role="user", content="Hi")]
+            test_messages = [ProviderMessage(role="user", content="Hi")]
             response = await self.chat(test_messages)
             return bool(response.content)
         except Exception:

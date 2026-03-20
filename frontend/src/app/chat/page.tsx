@@ -98,6 +98,8 @@ interface ToolStep {
   finished: boolean;
 }
 
+const MAX_SESSION_TITLE_LENGTH = 60;
+
 function normalizeRunEvent(payload: RunEventPayload): RunEventPayload {
   return {
     ...payload,
@@ -194,6 +196,14 @@ function getRunHeadline(run: RunRecord): string {
   }
   if (lastEvent?.payload.label) return lastEvent.payload.label;
   return "Working";
+}
+
+function buildSessionTitle(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= MAX_SESSION_TITLE_LENGTH) {
+    return trimmed || "New Chat";
+  }
+  return `${trimmed.slice(0, MAX_SESSION_TITLE_LENGTH).trim()}…`;
 }
 
 function RunCard({ run, live = false }: { run: RunRecord; live?: boolean }) {
@@ -367,6 +377,26 @@ export default function ChatPage() {
     }
   }
 
+  const touchSessionList = useCallback((sessionId: number, title?: string) => {
+    const nextUpdatedAt = new Date().toISOString();
+    setSessions((prev) => {
+      const existing = prev.find((session) => session.id === sessionId);
+      const nextSession: Session = existing
+        ? {
+            ...existing,
+            title: title || existing.title,
+            updated_at: nextUpdatedAt,
+          }
+        : {
+            id: sessionId,
+            title: title || "New Chat",
+            updated_at: nextUpdatedAt,
+          };
+
+      return [nextSession, ...prev.filter((session) => session.id !== sessionId)];
+    });
+  }, []);
+
   function handleNewChat() {
     setActiveSessionId(null);
     setMessages([]);
@@ -443,12 +473,16 @@ export default function ChatPage() {
 
     const userMsg: StoredMessage = { role: "user", content: text };
     const allMessages = [...messages, userMsg];
+    const optimisticTitle = buildSessionTitle(text);
     setMessages(allMessages);
     setStreamingRun({ id: `pending-${Date.now()}`, status: "thinking", events: [] });
     setStreamingAssistant("");
     setStreaming(true);
 
     let streamedSessionId = activeSessionId;
+    if (activeSessionId) {
+      touchSessionList(activeSessionId);
+    }
 
     try {
       const res = await fetch(`${config.apiBaseUrl}/chat/`, {
@@ -456,10 +490,7 @@ export default function ChatPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           session_id: activeSessionId,
-          messages: allMessages.map((message) => ({
-            role: message.role,
-            content: message.content,
-          })),
+          messages: [{ role: userMsg.role, content: userMsg.content }],
           pdf_ids: pdfResources.map((pdf) => pdf.pdf_id),
           stream: true,
         }),
@@ -500,6 +531,7 @@ export default function ChatPage() {
           if (data.session_id) {
             streamedSessionId = data.session_id;
             setActiveSessionId(data.session_id);
+            touchSessionList(data.session_id, optimisticTitle);
             continue;
           }
 
@@ -545,7 +577,7 @@ export default function ChatPage() {
       }
 
       if (streamedSessionId) {
-        await loadSession(streamedSessionId);
+        await Promise.all([loadSession(streamedSessionId), loadSessions()]);
       } else {
         await loadSessions();
       }

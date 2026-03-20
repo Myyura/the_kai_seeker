@@ -10,20 +10,20 @@ This file is part of The Kai Seeker, licensed under AGPL-3.0.
 Source: https://github.com/Myyura/the_kai_seeker
 """
 
+import asyncio
 import json
 import logging
 import re
 from typing import Any, Awaitable, Callable
 
 from app.config.agent_policy import build_tool_policy
-from app.providers.base import BaseLLMProvider, ChatMessage
+from app.providers.base import BaseLLMProvider, ProviderMessage
 from app.services.domain_config import domain_config
+from app.skills.base import Skill
 from app.skills.registry import skill_registry
 from app.tools.registry import tool_registry
 
 logger = logging.getLogger(__name__)
-
-import asyncio
 
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
@@ -69,8 +69,19 @@ def _build_base_prompt() -> str:
     )
 
 
-def build_system_prompt(user_message: str = "") -> str:
-    """Build the full system prompt with tools and context-activated skills.
+def _resolve_allowed_tool_names(active_skills: list[Skill]) -> set[str] | None:
+    restricted_skills = [skill for skill in active_skills if skill.allowed_tools]
+    if not restricted_skills:
+        return None
+
+    allowed_tool_names: set[str] = set()
+    for skill in restricted_skills:
+        allowed_tool_names.update(skill.allowed_tools)
+    return allowed_tool_names
+
+
+def build_prompt_context(user_message: str = "") -> tuple[str, set[str] | None]:
+    """Build the full system prompt and effective tool allowance for a request.
 
     Args:
         user_message: The latest user message, used to determine which skills to activate.
@@ -78,6 +89,7 @@ def build_system_prompt(user_message: str = "") -> str:
     prompt = _build_base_prompt()
 
     active_skills = skill_registry.get_active_skills(user_message)
+    allowed_tool_names = _resolve_allowed_tool_names(active_skills)
     if active_skills:
         skill_sections = []
         for skill in active_skills:
@@ -87,11 +99,21 @@ def build_system_prompt(user_message: str = "") -> str:
         prompt += "\n\n## Domain Knowledge & Guidelines\n\n"
         prompt += "\n\n---\n\n".join(skill_sections)
 
-    tools = tool_registry.list_all()
+    tools = tool_registry.list_all(allowed_tool_names)
     if tools:
         prompt += build_tool_policy(t.schema() for t in tools)
+    if allowed_tool_names is not None:
+        prompt += (
+            "\n\n## Tool Access\n"
+            "For this request, you may only use these tools: "
+            f"{', '.join(sorted(allowed_tool_names))}."
+        )
 
-    return prompt
+    return prompt, allowed_tool_names
+
+
+def build_system_prompt(user_message: str = "") -> str:
+    return build_prompt_context(user_message)[0]
 
 
 def parse_tool_call(text: str) -> dict[str, Any] | None:
@@ -113,7 +135,8 @@ def strip_tool_call(text: str) -> str:
 
 async def run_agent_loop(
     provider: BaseLLMProvider,
-    messages: list[ChatMessage],
+    messages: list[ProviderMessage],
+    allowed_tool_names: set[str] | None = None,
     on_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> tuple[str, list[dict]]:
     """Run the Agent loop: LLM → parse → execute tool → feed back → repeat.
@@ -165,7 +188,11 @@ async def run_agent_loop(
                 "args": tool_args,
             })
 
-        result = await tool_registry.execute(tool_name, **tool_args)
+        result = await tool_registry.execute(
+            tool_name,
+            allowed_names=allowed_tool_names,
+            **tool_args,
+        )
         result_text = result.to_text()
 
         log_entry = {
@@ -193,13 +220,13 @@ async def run_agent_loop(
 
         remaining_text = strip_tool_call(text)
         if remaining_text:
-            messages.append(ChatMessage(role="assistant", content=remaining_text))
+            messages.append(ProviderMessage(role="assistant", content=remaining_text))
 
-        messages.append(ChatMessage(
+        messages.append(ProviderMessage(
             role="assistant",
             content=f"<tool_call>\n{json.dumps(tool_call, ensure_ascii=False)}\n</tool_call>",
         ))
-        messages.append(ChatMessage(
+        messages.append(ProviderMessage(
             role="user",
             content=f"<tool_result>\n{result_text}\n</tool_result>",
         ))
@@ -209,7 +236,7 @@ async def run_agent_loop(
     return final.content, tool_call_log
 
 
-async def _chat_with_retry(provider: BaseLLMProvider, messages: list[ChatMessage]):
+async def _chat_with_retry(provider: BaseLLMProvider, messages: list[ProviderMessage]):
     for attempt in range(MAX_RETRIES):
         try:
             return await provider.chat(messages)

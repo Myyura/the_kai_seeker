@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AdminResourceOut(BaseModel):
@@ -46,6 +47,15 @@ class AdminConversationRunOut(BaseModel):
     latest_event_type: str | None = None
     created_at: datetime
     updated_at: datetime
+    events: list["AdminConversationRunEventOut"] = Field(default_factory=list)
+
+
+class AdminConversationRunEventOut(BaseModel):
+    id: int
+    sequence: int
+    event_type: str
+    payload: dict[str, Any]
+    created_at: datetime
 
 
 class AdminConversationPdfOut(BaseModel):
@@ -64,6 +74,7 @@ class AdminConversationDetailOut(BaseModel):
     messages: list[AdminConversationMessageOut]
     runs: list[AdminConversationRunOut]
     pdf_resources: list[AdminConversationPdfOut]
+    state: dict[str, Any] = Field(default_factory=dict)
 
 
 class AdminPdfListItemOut(BaseModel):
@@ -164,3 +175,6 @@ class AdminStudyTargetDetailOut(BaseModel):
     label: str
     notes: str | None = None
     created_at: datetime
+
+
+AdminConversationRunOut.model_rebuild()

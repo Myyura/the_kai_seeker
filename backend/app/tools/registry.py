@@ -22,13 +22,30 @@ class ToolRegistry:
     def get(self, name: str) -> BaseTool | None:
         return self._tools.get(name)
 
-    def list_all(self) -> list[BaseTool]:
-        return list(self._tools.values())
+    def list_all(self, allowed_names: set[str] | None = None) -> list[BaseTool]:
+        if allowed_names is None:
+            return list(self._tools.values())
+        return [tool for tool in self._tools.values() if tool.name in allowed_names]
 
-    def list_schemas(self) -> list[dict]:
-        return [t.schema() for t in self._tools.values()]
+    def list_schemas(self, allowed_names: set[str] | None = None) -> list[dict]:
+        return [tool.schema() for tool in self.list_all(allowed_names)]
 
-    async def execute(self, name: str, **kwargs: Any) -> ToolResult:
+    async def execute(
+        self,
+        name: str,
+        *,
+        allowed_names: set[str] | None = None,
+        **kwargs: Any,
+    ) -> ToolResult:
+        if allowed_names is not None and name not in allowed_names:
+            return ToolResult(
+                success=False,
+                error=(
+                    f"Tool '{name}' is not allowed in the current context. "
+                    f"Allowed tools: {sorted(allowed_names)}. "
+                    "Please choose one of the allowed tools or answer without tools."
+                ),
+            )
         tool = self.get(name)
         if tool is None:
             return ToolResult(

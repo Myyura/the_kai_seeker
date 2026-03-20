@@ -7,7 +7,6 @@ without any vector database. Designed to be queried by LLM tools.
 import json
 import logging
 from pathlib import Path
-from typing import Any
 
 from app.config.settings import settings
 
@@ -91,8 +90,10 @@ class ContentIndex:
                 continue
             if department_id and department_id.lower() != q["department_id"].lower():
                 continue
-            if program_id and q.get("program_id") and program_id.lower() != q["program_id"].lower():
-                continue
+            if program_id:
+                question_program_id = q.get("program_id")
+                if not question_program_id or program_id.lower() != question_program_id.lower():
+                    continue
             if year and year != q["year"]:
                 continue
             if tags:
@@ -101,12 +102,14 @@ class ContentIndex:
                     continue
             if keyword:
                 kw = keyword.lower()
-                searchable = " ".join([
-                    q.get("title", ""),
-                    q.get("sidebar_label", "") or "",
-                    q.get("filename", ""),
-                    " ".join(q.get("tags", [])),
-                ]).lower()
+                searchable = " ".join(
+                    [
+                        q.get("title", ""),
+                        q.get("sidebar_label", "") or "",
+                        q.get("filename", ""),
+                        " ".join(q.get("tags", [])),
+                    ]
+                ).lower()
                 if kw not in searchable:
                     continue
             results.append(q)
@@ -129,11 +132,13 @@ class ContentIndex:
                 {"id": p["id"], "name_ja": p.get("name_ja", p["id"])}
                 for p in dept.get("programs", [])
             ]
-            departments.append({
-                "id": dept["id"],
-                "name_ja": dept.get("name_ja", dept["id"]),
-                "programs": programs,
-            })
+            departments.append(
+                {
+                    "id": dept["id"],
+                    "name_ja": dept.get("name_ja", dept["id"]),
+                    "programs": programs,
+                }
+            )
         return {
             "id": school["id"],
             "name_ja": school.get("name_ja", school["id"]),

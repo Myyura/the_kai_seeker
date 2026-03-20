@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.provider_setting import ProviderSetting
@@ -9,8 +9,15 @@ class ProviderRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    async def _deactivate_other_active(self, *, exclude_id: int | None = None) -> None:
+        stmt = update(ProviderSetting).where(ProviderSetting.is_active.is_(True))
+        if exclude_id is not None:
+            stmt = stmt.where(ProviderSetting.id != exclude_id)
+        await self.session.execute(stmt.values(is_active=False))
+
     async def create(self, data: ProviderSettingCreate) -> ProviderSetting:
-        provider = ProviderSetting(**data.model_dump())
+        await self._deactivate_other_active()
+        provider = ProviderSetting(**data.model_dump(), is_active=True)
         self.session.add(provider)
         await self.session.commit()
         await self.session.refresh(provider)
@@ -60,7 +67,15 @@ class ProviderRepository:
         provider = await self.get_by_id(provider_id)
         if provider is None:
             return None
-        for field, value in data.model_dump(exclude_unset=True).items():
+        updates = data.model_dump(exclude_unset=True)
+        make_active = updates.pop("is_active", None)
+        if make_active is True:
+            await self._deactivate_other_active(exclude_id=provider_id)
+            provider.is_active = True
+        elif make_active is False:
+            provider.is_active = False
+
+        for field, value in updates.items():
             setattr(provider, field, value)
         await self.session.commit()
         await self.session.refresh(provider)

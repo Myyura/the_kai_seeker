@@ -21,13 +21,20 @@ class ChatSession(Base):
     )
 
     messages: Mapped[list["ChatMessage"]] = relationship(
-        back_populates="session", cascade="all, delete-orphan", order_by="ChatMessage.created_at"
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="ChatMessage.id",
     )
     pdf_resources: Mapped[list["ChatSessionPdfResource"]] = relationship(
         back_populates="session", cascade="all, delete-orphan", order_by="ChatSessionPdfResource.id"
     )
     runs: Mapped[list["ChatRun"]] = relationship(
-        back_populates="session", cascade="all, delete-orphan", order_by="ChatRun.created_at"
+        back_populates="session", cascade="all, delete-orphan", order_by="ChatRun.id"
+    )
+    state: Mapped["ChatSessionState | None"] = relationship(
+        back_populates="session",
+        cascade="all, delete-orphan",
+        uselist=False,
     )
 
 
@@ -118,3 +125,26 @@ class ChatSessionPdfResource(Base):
     )
 
     session: Mapped["ChatSession"] = relationship(back_populates="pdf_resources")
+
+
+class ChatSessionState(Base):
+    """Structured session memory used to rebuild prompt context."""
+
+    __tablename__ = "chat_session_states"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    session_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    session: Mapped["ChatSession"] = relationship(back_populates="state")

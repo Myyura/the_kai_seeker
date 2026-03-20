@@ -1,0 +1,177 @@
+import json
+
+import pytest
+
+from app.repositories.conversation_repo import ConversationRepository
+from app.repositories.provider_repo import ProviderRepository
+from app.schemas.chat import ChatMessageIn
+from app.schemas.provider import ProviderSettingCreate
+from app.services.chat_service import ChatService
+from app.services.domain_config import domain_config
+
+
+@pytest.mark.asyncio
+async def test_existing_session_uses_persisted_history_as_source_of_truth(
+    db_session,
+    monkeypatch,
+) -> None:
+    provider_repo = ProviderRepository(db_session)
+    await provider_repo.create(
+        ProviderSettingCreate(
+            provider="openai",
+            api_key="secret",
+            base_url="https://api.openai.com/v1",
+            model="gpt-test",
+        )
+    )
+
+    conversation_repo = ConversationRepository(db_session)
+    chat_session = await conversation_repo.create_session(title="Existing Session")
+    await conversation_repo.add_message(chat_session.id, "user", "persisted user")
+    await conversation_repo.add_message(chat_session.id, "assistant", "persisted assistant")
+
+    captured_messages = []
+
+    async def fake_run_agent_loop(  # type: ignore[no-untyped-def]
+        provider,
+        messages,
+        allowed_tool_names=None,
+        on_event=None,
+    ):
+        captured_messages.extend(messages)
+        return "final answer", []
+
+    monkeypatch.setattr("app.services.chat_service.run_agent_loop", fake_run_agent_loop)
+
+    service = ChatService(db_session)
+    content, _model, sid, tool_log = await service.chat(
+        [
+            ChatMessageIn(role="assistant", content="tampered assistant"),
+            ChatMessageIn(role="user", content="latest user"),
+        ],
+        session_id=chat_session.id,
+    )
+
+    assert content == "final answer"
+    assert sid == chat_session.id
+    assert tool_log == []
+    assert captured_messages[0].role == "system"
+    assert "You are" in captured_messages[0].content
+    assert captured_messages[1].role == "system"
+    assert "## Session State" in captured_messages[1].content
+    assert [(message.role, message.content) for message in captured_messages[2:4]] == [
+        ("user", "persisted user"),
+        ("assistant", "persisted assistant"),
+    ]
+    assert captured_messages[-2].role == "assistant"
+    assert "## Session Tool Results" in captured_messages[-2].content
+    assert captured_messages[-1].role == "user"
+    assert captured_messages[-1].content == "latest user"
+    assert all("tampered assistant" not in message.content for message in captured_messages)
+
+    stored_messages = await conversation_repo.get_messages(chat_session.id)
+    assert [(message.role, message.content) for message in stored_messages] == [
+        ("user", "persisted user"),
+        ("assistant", "persisted assistant"),
+        ("user", "latest user"),
+        ("assistant", "final answer"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_existing_session_builds_prompt_from_state_and_aggregated_tool_results(
+    db_session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(domain_config.profile, "recent_message_window", 1)
+
+    provider_repo = ProviderRepository(db_session)
+    await provider_repo.create(
+        ProviderSettingCreate(
+            provider="openai",
+            api_key="secret",
+            base_url="https://api.openai.com/v1",
+            model="gpt-test",
+        )
+    )
+
+    service = ChatService(db_session)
+    captured_turns: list[list[tuple[str, str]]] = []
+
+    async def fake_run_agent_loop(  # type: ignore[no-untyped-def]
+        provider,
+        messages,
+        allowed_tool_names=None,
+        on_event=None,
+    ):
+        captured_turns.append([(message.role, message.content) for message in messages])
+        if len(captured_turns) == 1:
+            return (
+                "I found an official page.",
+                [
+                    {
+                        "tool": "lookup_source",
+                        "tool_display_name": "Lookup Sources",
+                        "tool_activity_label": "Looking up official sources",
+                        "tool_call_id": "tool-1",
+                        "args": {"query": "tokyo"},
+                        "result": (
+                            "[\n"
+                            "  {\n"
+                            '    "id": "official",\n'
+                            '    "name": "Official",\n'
+                            '    "category": "admission",\n'
+                            '    "urls": {"official": "https://example.com/official"}\n'
+                            "  }\n"
+                            "]"
+                        ),
+                        "success": True,
+                    }
+                ],
+            )
+        return "Using the same official page as before.", []
+
+    monkeypatch.setattr("app.services.chat_service.run_agent_loop", fake_run_agent_loop)
+
+    _content, _model, sid, _tool_log = await service.chat(
+        [ChatMessageIn(role="user", content="Find the official source.")],
+    )
+    await service.chat(
+        [ChatMessageIn(role="user", content="Open that official source and continue.")],
+        session_id=sid,
+    )
+
+    assert len(captured_turns) == 2
+    second_turn = captured_turns[1]
+    assert second_turn[0][0] == "system"
+    assert "You are" in second_turn[0][1]
+    assert second_turn[1][0] == "system"
+    assert "## Session State" in second_turn[1][1]
+    assert "Find the official source." in second_turn[1][1]
+    assert "Looked up official sources for query=tokyo." in second_turn[1][1]
+
+    assert second_turn[2] == ("assistant", "I found an official page.")
+    assert second_turn[-1] == ("user", "Open that official source and continue.")
+    assert all(
+        "<tool_call>" not in content and "<tool_result>" not in content
+        for _, content in second_turn
+    )
+    assert any(
+        role == "assistant"
+        and "## Session Tool Results" in content
+        and "lookup_source" in content
+        and "https://example.com/official" in content
+        for role, content in second_turn
+    )
+
+    chat_session = await ConversationRepository(db_session).get_session(sid)
+    assert chat_session is not None
+    assert chat_session.state is not None
+    state = json.loads(chat_session.state.payload)
+    assert state["goal"]["core_user_need"] == "Find the official source."
+    assert state["goal"]["current_focus"] == "Open that official source and continue."
+    assert state["progress"]["pending_actions"] == []
+    assert any(
+        source.get("urls", {}).get("official") == "https://example.com/official"
+        for source in state["artifacts"]["sources"]
+    )

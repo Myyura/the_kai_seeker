@@ -102,6 +102,16 @@ class DomainConfig:
         except (TypeError, ValueError):
             return 6
 
+    @property
+    def recent_message_window(self) -> int:
+        """Number of recent stored messages to include in prompt history."""
+        value = self.profile.get("recent_message_window")
+        try:
+            window = int(value) if value is not None else 8
+        except (TypeError, ValueError):
+            return 8
+        return max(0, window)
+
     def search_sources(
         self,
         query: str | None = None,

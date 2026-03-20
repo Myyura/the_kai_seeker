@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +13,7 @@ from app.schemas.admin import (
     AdminConversationListOut,
     AdminConversationMessageOut,
     AdminConversationPdfOut,
+    AdminConversationRunEventOut,
     AdminConversationRunOut,
     AdminPdfChunksOut,
     AdminPdfDetailOut,
@@ -35,7 +38,10 @@ ADMIN_RESOURCES = [
     AdminResourceOut(
         id="pdfs",
         label="PDFs",
-        description="Manage uploaded and fetched PDF documents, processing output, and session references.",
+        description=(
+            "Manage uploaded and fetched PDF documents, processing output, "
+            "and session references."
+        ),
         href="/data/pdfs/",
         available=True,
     ),
@@ -125,10 +131,21 @@ async def get_admin_conversation_detail(
                 latest_event_type=run.events[-1].event_type if run.events else None,
                 created_at=run.created_at,
                 updated_at=run.updated_at,
+                events=[
+                    AdminConversationRunEventOut(
+                        id=event.id,
+                        sequence=event.sequence,
+                        event_type=event.event_type,
+                        payload=json.loads(event.payload),
+                        created_at=event.created_at,
+                    )
+                    for event in run.events
+                ],
             )
             for run in chat_session.runs
         ],
         pdf_resources=[AdminConversationPdfOut.model_validate(item) for item in pdf_resources],
+        state=json.loads(chat_session.state.payload) if chat_session.state is not None else {},
     )
 
 

@@ -45,7 +45,7 @@ class ChatSessionOut(BaseModel):
 class ChatSessionDetail(ChatSessionOut):
     messages: list[ChatMessageOut]
     runs: list["ChatRunOut"] = Field(default_factory=list)
-    state: dict[str, Any] = Field(default_factory=dict)
+    short_term_memory: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChatSessionPdfResourceOut(BaseModel):

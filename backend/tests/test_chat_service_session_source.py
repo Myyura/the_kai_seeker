@@ -6,7 +6,7 @@ from app.repositories.conversation_repo import ConversationRepository
 from app.repositories.provider_repo import ProviderRepository
 from app.schemas.chat import ChatMessageIn
 from app.schemas.provider import ProviderSettingCreate
-from app.services.chat_service import ChatService
+from app.services.conversation_service import ConversationService
 from app.services.domain_config import domain_config
 
 
@@ -41,9 +41,7 @@ async def test_existing_session_uses_persisted_history_as_source_of_truth(
         captured_messages.extend(messages)
         return "final answer", []
 
-    monkeypatch.setattr("app.services.chat_service.run_agent_loop", fake_run_agent_loop)
-
-    service = ChatService(db_session)
+    service = ConversationService(db_session, tool_loop_runner=fake_run_agent_loop)
     content, _model, sid, tool_log = await service.chat(
         [
             ChatMessageIn(role="assistant", content="tampered assistant"),
@@ -95,7 +93,7 @@ async def test_existing_session_builds_prompt_from_state_and_aggregated_tool_res
         )
     )
 
-    service = ChatService(db_session)
+    service = ConversationService(db_session)
     captured_turns: list[list[tuple[str, str]]] = []
 
     async def fake_run_agent_loop(  # type: ignore[no-untyped-def]
@@ -131,7 +129,7 @@ async def test_existing_session_builds_prompt_from_state_and_aggregated_tool_res
             )
         return "Using the same official page as before.", []
 
-    monkeypatch.setattr("app.services.chat_service.run_agent_loop", fake_run_agent_loop)
+    service = ConversationService(db_session, tool_loop_runner=fake_run_agent_loop)
 
     _content, _model, sid, _tool_log = await service.chat(
         [ChatMessageIn(role="user", content="Find the official source.")],
@@ -166,12 +164,12 @@ async def test_existing_session_builds_prompt_from_state_and_aggregated_tool_res
 
     chat_session = await ConversationRepository(db_session).get_session(sid)
     assert chat_session is not None
-    assert chat_session.state is not None
-    state = json.loads(chat_session.state.payload)
-    assert state["goal"]["core_user_need"] == "Find the official source."
-    assert state["goal"]["current_focus"] == "Open that official source and continue."
-    assert state["progress"]["pending_actions"] == []
+    assert chat_session.short_term_memory is not None
+    short_term_memory = json.loads(chat_session.short_term_memory.payload)
+    assert short_term_memory["goal"]["core_user_need"] == "Find the official source."
+    assert short_term_memory["goal"]["current_focus"] == "Open that official source and continue."
+    assert short_term_memory["progress"]["pending_actions"] == []
     assert any(
         source.get("urls", {}).get("official") == "https://example.com/official"
-        for source in state["artifacts"]["sources"]
+        for source in short_term_memory["artifacts"]["sources"]
     )

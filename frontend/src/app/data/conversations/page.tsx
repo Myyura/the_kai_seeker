@@ -44,6 +44,7 @@ interface AdminConversationRun {
   created_at: string;
   updated_at: string;
   events: AdminConversationRunEvent[];
+  debug_payload: Record<string, unknown>;
 }
 
 interface AdminConversationPdf {
@@ -54,6 +55,29 @@ interface AdminConversationPdf {
   source_url?: string | null;
 }
 
+interface AdminConversationRuntimeSnapshot {
+  id: number;
+  created_at: string;
+  payload: Record<string, unknown>;
+}
+
+interface AdminConversationLongTermMemory {
+  id: number;
+  memory_type: string;
+  scope: string;
+  content: string;
+  summary?: string | null;
+  importance: number;
+  confidence: number;
+  related_target_id?: number | null;
+  source_session_id?: number | null;
+  source_run_id?: number | null;
+  tags: string[];
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
 interface AdminConversationDetail {
   id: number;
   title: string;
@@ -62,14 +86,25 @@ interface AdminConversationDetail {
   messages: AdminConversationMessage[];
   runs: AdminConversationRun[];
   pdf_resources: AdminConversationPdf[];
-  state: Record<string, unknown>;
+  runtime_link: Record<string, unknown>;
+  runtime_snapshots: AdminConversationRuntimeSnapshot[];
+  long_term_memory_records: AdminConversationLongTermMemory[];
+  short_term_memory: Record<string, unknown>;
 }
 
-type ConversationTab = "overview" | "state" | "timeline" | "messages";
+type ConversationTab =
+  | "overview"
+  | "runInspector"
+  | "longTermMemory"
+  | "shortTermMemory"
+  | "timeline"
+  | "messages";
 
 const CONVERSATION_TABS: { id: ConversationTab; label: string }[] = [
   { id: "overview", label: "Overview" },
-  { id: "state", label: "State" },
+  { id: "runInspector", label: "Run Inspector" },
+  { id: "longTermMemory", label: "Long-Term Memory" },
+  { id: "shortTermMemory", label: "Short-Term Memory" },
   { id: "timeline", label: "Timeline" },
   { id: "messages", label: "Messages" },
 ];
@@ -104,6 +139,10 @@ function asString(value: unknown): string {
   return "";
 }
 
+function asNumber(value: unknown): number | null {
+  return typeof value === "number" ? value : null;
+}
+
 function asStringList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
@@ -118,12 +157,16 @@ function summarizeRecordTitle(record: Record<string, unknown>, fallback: string)
   const titleKeys = [
     "label",
     "title",
+    "name",
+    "memory_type",
     "url",
     "filename",
     "query",
     "key",
     "user_request",
     "source_url",
+    "school_id",
+    "resource_id",
   ];
   for (const key of titleKeys) {
     const value = asString(record[key]);
@@ -142,6 +185,11 @@ function summarizeRecordMeta(record: Record<string, unknown>): string {
     "pdf_id",
     "page_number",
     "tool_name",
+    "scope",
+    "source_run_id",
+    "importance",
+    "confidence",
+    "resource_type",
   ];
   const items = metaKeys
     .map((key) => {
@@ -159,10 +207,12 @@ function summarizeRecordBody(record: Record<string, unknown>): string {
     "summary",
     "assistant_summary",
     "value",
+    "content",
     "content_preview",
     "note",
     "description",
     "question",
+    "prompt_block",
   ];
   for (const key of bodyKeys) {
     const value = asString(record[key]);
@@ -205,6 +255,7 @@ export default function DataConversationsPage() {
   const [sessions, setSessions] = useState<AdminConversationListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
   const [detail, setDetail] = useState<AdminConversationDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<ConversationTab>("overview");
@@ -218,24 +269,83 @@ export default function DataConversationsPage() {
   useEffect(() => {
     if (selectedSessionId == null) {
       setDetail(null);
+      setSelectedRunId(null);
       return;
     }
     void loadDetail(selectedSessionId);
   }, [selectedSessionId]);
+
+  useEffect(() => {
+    if (!detail) {
+      setSelectedRunId(null);
+      return;
+    }
+    setSelectedRunId((current) => {
+      if (current && detail.runs.some((run) => run.id === current)) return current;
+      return detail.runs[detail.runs.length - 1]?.id ?? null;
+    });
+  }, [detail]);
 
   const selectedListItem = useMemo(
     () => sessions.find((item) => item.id === selectedSessionId) ?? null,
     [sessions, selectedSessionId]
   );
 
-  const stateGoal: Record<string, unknown> = isRecord(detail?.state?.goal)
-    ? detail.state.goal
+  const selectedRun = useMemo(() => {
+    if (!detail) return null;
+    return (
+      detail.runs.find((run) => run.id === selectedRunId) ??
+      detail.runs[detail.runs.length - 1] ??
+      null
+    );
+  }, [detail, selectedRunId]);
+
+  const selectedRunIndex = useMemo(() => {
+    if (!detail || !selectedRun) return -1;
+    return detail.runs.findIndex((run) => run.id === selectedRun.id);
+  }, [detail, selectedRun]);
+
+  const selectedDebugPayload = isRecord(selectedRun?.debug_payload) ? selectedRun.debug_payload : {};
+  const selectedHostContextState = isRecord(selectedDebugPayload.host_context_state)
+    ? selectedDebugPayload.host_context_state
     : {};
-  const stateProgress: Record<string, unknown> = isRecord(detail?.state?.progress)
-    ? detail.state.progress
+  const selectedTurnInput = isRecord(selectedDebugPayload.turn_input)
+    ? selectedDebugPayload.turn_input
     : {};
-  const stateArtifacts: Record<string, unknown> = isRecord(detail?.state?.artifacts)
-    ? detail.state.artifacts
+  const selectedContextSync = isRecord(selectedDebugPayload.context_sync)
+    ? selectedDebugPayload.context_sync
+    : {};
+  const selectedRuntimeSnapshot = isRecord(selectedDebugPayload.runtime_snapshot)
+    ? selectedDebugPayload.runtime_snapshot
+    : {};
+  const selectedProvider = isRecord(selectedDebugPayload.provider) ? selectedDebugPayload.provider : {};
+  const selectedRuntimeLink = isRecord(selectedDebugPayload.runtime_link)
+    ? selectedDebugPayload.runtime_link
+    : {};
+  const selectedError = isRecord(selectedDebugPayload.error) ? selectedDebugPayload.error : {};
+  const selectedArtifacts = isRecord(selectedDebugPayload.artifacts)
+    ? selectedDebugPayload.artifacts
+    : {};
+  const selectedUsage = isRecord(selectedDebugPayload.usage) ? selectedDebugPayload.usage : {};
+
+  const memoryPack = isRecord(selectedHostContextState.memory_pack)
+    ? selectedHostContextState.memory_pack
+    : {};
+  const sessionResourceHandles = asRecordList(selectedHostContextState.session_resource_handles);
+  const transientResourceHandles = asRecordList(selectedTurnInput.transient_resource_handles);
+  const activeSkills = asRecordList(selectedHostContextState.skill_definitions);
+  const availableTools = asRecordList(selectedHostContextState.tool_definitions);
+  const toolRecords = asRecordList(selectedDebugPayload.tool_records);
+  const longTermMemoryWrites = asRecordList(selectedDebugPayload.long_term_memory_writes);
+
+  const shortTermMemoryGoal: Record<string, unknown> = isRecord(detail?.short_term_memory?.goal)
+    ? detail.short_term_memory.goal
+    : {};
+  const shortTermMemoryProgress: Record<string, unknown> = isRecord(detail?.short_term_memory?.progress)
+    ? detail.short_term_memory.progress
+    : {};
+  const shortTermMemoryArtifacts: Record<string, unknown> = isRecord(detail?.short_term_memory?.artifacts)
+    ? detail.short_term_memory.artifacts
     : {};
 
   async function loadSessions(preferredId?: number | null) {
@@ -246,9 +356,7 @@ export default function DataConversationsPage() {
       if (query) params.set("query", query);
       params.set("limit", "100");
       const suffix = params.toString() ? `?${params.toString()}` : "";
-      const data = await api.get<AdminConversationListResponse>(
-        `/admin/conversations${suffix}`
-      );
+      const data = await api.get<AdminConversationListResponse>(`/admin/conversations${suffix}`);
       setSessions(data.items);
       setSelectedSessionId((current) => {
         const candidate = preferredId ?? current;
@@ -268,9 +376,7 @@ export default function DataConversationsPage() {
     setDetailLoading(true);
     setError(null);
     try {
-      const data = await api.get<AdminConversationDetail>(
-        `/admin/conversations/${sessionId}`
-      );
+      const data = await api.get<AdminConversationDetail>(`/admin/conversations/${sessionId}`);
       setDetail(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load conversation detail");
@@ -286,7 +392,7 @@ export default function DataConversationsPage() {
   async function handleDelete() {
     if (selectedSessionId == null || !selectedListItem) return;
     const confirmed = window.confirm(
-      `Delete conversation "${selectedListItem.title}" and all of its messages, runs, and attached references?`
+      `Delete conversation "${selectedListItem.title}" and all of its messages, runs, runtime records, and attached references?`
     );
     if (!confirmed) return;
 
@@ -295,6 +401,7 @@ export default function DataConversationsPage() {
     try {
       await api.delete(`/admin/conversations/${selectedSessionId}`);
       setDetail(null);
+      setSelectedRunId(null);
       await loadSessions(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete conversation");
@@ -330,7 +437,8 @@ export default function DataConversationsPage() {
   function renderRecordListSection(
     title: string,
     items: Record<string, unknown>[],
-    emptyText: string
+    emptyText: string,
+    rawLabel = "View raw record"
   ) {
     return (
       <div className={styles.detailSection}>
@@ -349,7 +457,7 @@ export default function DataConversationsPage() {
                 )}
                 <div className={styles.referenceBody}>{summarizeRecordBody(item)}</div>
                 <details className={styles.rawDetails}>
-                  <summary className={styles.rawSummary}>View raw record</summary>
+                  <summary className={styles.rawSummary}>{rawLabel}</summary>
                   <pre className={styles.rawPre}>{stringifyJson(item)}</pre>
                 </details>
               </div>
@@ -360,9 +468,64 @@ export default function DataConversationsPage() {
     );
   }
 
+  function renderJsonSection(title: string, value: unknown, emptyText: string, rawLabel = "View raw JSON") {
+    const isEmptyRecord = isRecord(value) && Object.keys(value).length === 0;
+    const isEmptyList = Array.isArray(value) && value.length === 0;
+    const isEmptyString = typeof value === "string" && value.trim().length === 0;
+    const isEmpty = value == null || isEmptyRecord || isEmptyList || isEmptyString;
+
+    return (
+      <div className={styles.detailSection}>
+        <div className={styles.detailSectionTitle}>{title}</div>
+        {isEmpty ? (
+          <div className={styles.emptyState}>{emptyText}</div>
+        ) : (
+          <details className={styles.rawDetails} open>
+            <summary className={styles.rawSummary}>{rawLabel}</summary>
+            <pre className={styles.rawPre}>{stringifyJson(value)}</pre>
+          </details>
+        )}
+      </div>
+    );
+  }
+
+  function renderRunSelector() {
+    if (!detail || detail.runs.length === 0) return null;
+
+    return (
+      <div className={styles.detailSection}>
+        <div className={styles.detailSectionTitle}>Runs</div>
+        <div className={styles.recordBadgeRow}>
+          {detail.runs.map((run, index) => {
+            const active = run.id === selectedRun?.id;
+            return (
+              <button
+                key={run.id}
+                type="button"
+                className={`${styles.selectorButton} ${active ? styles.selectorButtonActive : ""}`}
+                onClick={() => setSelectedRunId(run.id)}
+              >
+                <span>{sessionRunLabel(index)}</span>
+                <span>#{run.id}</span>
+                <span>{run.status}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   function renderOverviewTab() {
     if (!detail) return null;
     const latestRun = detail.runs[detail.runs.length - 1] ?? null;
+    const runtimeLink = isRecord(detail.runtime_link) ? detail.runtime_link : {};
+    const latestSnapshot = detail.runtime_snapshots[detail.runtime_snapshots.length - 1] ?? null;
+    const latestRunPayload = isRecord(latestRun?.debug_payload) ? latestRun.debug_payload : {};
+    const latestHostContext = isRecord(latestRunPayload.host_context_state)
+      ? latestRunPayload.host_context_state
+      : {};
+    const latestSessionResources = asRecordList(latestHostContext.session_resource_handles);
 
     return (
       <div className={styles.tabPanel}>
@@ -376,10 +539,16 @@ export default function DataConversationsPage() {
             <div className={styles.summaryValue}>{detail.runs.length}</div>
           </div>
           <div className={styles.summaryCard}>
-            <div className={styles.summaryLabel}>Run Events</div>
-            <div className={styles.summaryValue}>
-              {detail.runs.reduce((total, run) => total + run.event_count, 0)}
-            </div>
+            <div className={styles.summaryLabel}>Runtime Snapshots</div>
+            <div className={styles.summaryValue}>{detail.runtime_snapshots.length}</div>
+          </div>
+          <div className={styles.summaryCard}>
+            <div className={styles.summaryLabel}>Long-Term Records</div>
+            <div className={styles.summaryValue}>{detail.long_term_memory_records.length}</div>
+          </div>
+          <div className={styles.summaryCard}>
+            <div className={styles.summaryLabel}>Session Resources</div>
+            <div className={styles.summaryValue}>{latestSessionResources.length}</div>
           </div>
           <div className={styles.summaryCard}>
             <div className={styles.summaryLabel}>Attached PDFs</div>
@@ -387,97 +556,315 @@ export default function DataConversationsPage() {
           </div>
         </div>
 
-        <div className={styles.detailSection}>
-          <div className={styles.detailSectionTitle}>Quick Session Summary</div>
-          <div className={styles.detailMeta}>
-            <div className={styles.detailMetaRow}>
-              <span className={styles.detailMetaLabel}>Core need:</span>{" "}
-              {asString(stateGoal.core_user_need) || "Not captured"}
+        <div className={styles.stateGrid}>
+          <div className={styles.detailSection}>
+            <div className={styles.detailSectionTitle}>Runtime Link</div>
+            <div className={styles.detailMeta}>
+              <div className={styles.detailMetaRow}>
+                <span className={styles.detailMetaLabel}>Runtime:</span>{" "}
+                {asString(runtimeLink.runtime_name) || "Not bound"}
+              </div>
+              <div className={styles.detailMetaRow}>
+                <span className={styles.detailMetaLabel}>Runtime Session:</span>{" "}
+                {asString(runtimeLink.runtime_session_id) || "Not recorded"}
+              </div>
+              <div className={styles.detailMetaRow}>
+                <span className={styles.detailMetaLabel}>Conversation ID:</span>{" "}
+                {asString(runtimeLink.runtime_conversation_id) || "Not recorded"}
+              </div>
+              <div className={styles.detailMetaRow}>
+                <span className={styles.detailMetaLabel}>Status:</span>{" "}
+                {asString(runtimeLink.status) || "Unknown"}
+              </div>
             </div>
-            <div className={styles.detailMetaRow}>
-              <span className={styles.detailMetaLabel}>Current focus:</span>{" "}
-              {asString(stateGoal.current_focus) || "Not captured"}
-            </div>
-            <div className={styles.detailMetaRow}>
-              <span className={styles.detailMetaLabel}>Last assistant summary:</span>{" "}
-              {asString(stateProgress.last_assistant_summary) || "Not captured"}
-            </div>
-            <div className={styles.detailMetaRow}>
-              <span className={styles.detailMetaLabel}>Pending actions:</span>{" "}
-              {asStringList(stateProgress.pending_actions).length}
-            </div>
-            <div className={styles.detailMetaRow}>
-              <span className={styles.detailMetaLabel}>Open questions:</span>{" "}
-              {asStringList(stateProgress.open_questions).length}
-            </div>
-            <div className={styles.detailMetaRow}>
-              <span className={styles.detailMetaLabel}>Latest run:</span>{" "}
-              {latestRun
-                ? `${sessionRunLabel(detail.runs.length - 1)} · DB #${latestRun.id} · ${latestRun.status}`
-                : "No runs yet"}
+          </div>
+
+          <div className={styles.detailSection}>
+            <div className={styles.detailSectionTitle}>Latest Run</div>
+            <div className={styles.detailMeta}>
+              <div className={styles.detailMetaRow}>
+                <span className={styles.detailMetaLabel}>Run:</span>{" "}
+                {latestRun ? `${sessionRunLabel(detail.runs.length - 1)} · #${latestRun.id}` : "No runs yet"}
+              </div>
+              <div className={styles.detailMetaRow}>
+                <span className={styles.detailMetaLabel}>Status:</span>{" "}
+                {latestRun?.status ?? "Not recorded"}
+              </div>
+              <div className={styles.detailMetaRow}>
+                <span className={styles.detailMetaLabel}>Context Version:</span>{" "}
+                {asString(latestHostContext.context_version) || "Not recorded"}
+              </div>
+              <div className={styles.detailMetaRow}>
+                <span className={styles.detailMetaLabel}>Snapshot:</span>{" "}
+                {latestSnapshot ? `#${latestSnapshot.id} at ${formatDate(latestSnapshot.created_at)}` : "None"}
+              </div>
             </div>
           </div>
         </div>
 
         <div className={styles.detailSection}>
-          <div className={styles.detailSectionTitle}>Attached PDFs</div>
-          {detail.pdf_resources.length === 0 ? (
-            <div className={styles.emptyState}>No PDFs attached to this session.</div>
+          <div className={styles.detailSectionTitle}>Base System Prompt</div>
+          {asString(runtimeLink.base_system_prompt) ? (
+            <div className={styles.detailBox}>{asString(runtimeLink.base_system_prompt)}</div>
           ) : (
-            <div className={styles.referenceList}>
-              {detail.pdf_resources.map((resource) => (
-                <div key={resource.pdf_id} className={styles.referenceItem}>
-                  <div className={styles.referenceTitle}>{resource.filename}</div>
-                  <div className={styles.referenceMeta}>
-                    PDF #{resource.pdf_id} | {resource.source} | {resource.status}
-                  </div>
-                  {resource.source_url && (
-                    <div className={styles.referenceBody}>{resource.source_url}</div>
-                  )}
-                </div>
-              ))}
-            </div>
+            <div className={styles.emptyState}>No base system prompt recorded.</div>
           )}
         </div>
 
-        <div className={styles.detailSection}>
-          <div className={styles.detailSectionTitle}>Runs</div>
-          {detail.runs.length === 0 ? (
-            <div className={styles.emptyState}>No runs stored.</div>
-          ) : (
-            <div className={styles.runList}>
-              {detail.runs.map((run, index) => (
-                <div key={run.id} className={styles.runItem}>
-                  <div className={styles.runHeader}>
-                    <span className={styles.runTitle}>
-                      {sessionRunLabel(index)}
-                    </span>
-                    <span className={`${styles.statusBadge} ${statusClass(run.status)}`}>
-                      {run.status}
-                    </span>
-                  </div>
-                  <div className={styles.runMeta}>
-                    <span>DB #{run.id}</span>
-                    <span>{run.event_count} events</span>
-                    <span>
-                      assistant message{" "}
-                      {run.assistant_message_id ? `#${run.assistant_message_id}` : "none"}
-                    </span>
-                    <span>
-                      latest {run.latest_event_type ? run.latest_event_type : "no events"}
-                    </span>
-                    <span>updated {formatDate(run.updated_at)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        {renderRecordListSection(
+          "Current Session Resources",
+          latestSessionResources,
+          "No session-level resources recorded."
+        )}
+        {renderRecordListSection(
+          "Attached PDFs",
+          detail.pdf_resources.map((resource) => ({
+            pdf_id: resource.pdf_id,
+            filename: resource.filename,
+            status: resource.status,
+            source: resource.source,
+            source_url: resource.source_url ?? undefined,
+          })),
+          "No PDFs attached to this session."
+        )}
+        {renderRecordListSection(
+          "Derived Long-Term Memory",
+          detail.long_term_memory_records.map((record) => ({
+            id: record.id,
+            memory_type: record.memory_type,
+            scope: record.scope,
+            content: record.content,
+            summary: record.summary ?? undefined,
+            importance: record.importance,
+            confidence: record.confidence,
+            source_run_id: record.source_run_id ?? undefined,
+            status: record.status,
+          })),
+          "No derived long-term memory records stored for this session."
+        )}
+        {renderJsonSection("Runtime Link JSON", detail.runtime_link, "No runtime link recorded.")}
       </div>
     );
   }
 
-  function renderStateTab() {
+  function renderRunInspectorTab() {
+    if (!detail) return null;
+
+    return (
+      <div className={styles.tabPanel}>
+        {renderRunSelector()}
+
+        {!selectedRun ? (
+          <div className={styles.emptyState}>No runs stored for this session.</div>
+        ) : (
+          <>
+            <div className={styles.summaryGrid}>
+              <div className={styles.summaryCard}>
+                <div className={styles.summaryLabel}>Run Status</div>
+                <div className={styles.summaryValue}>{selectedRun.status}</div>
+              </div>
+              <div className={styles.summaryCard}>
+                <div className={styles.summaryLabel}>Events</div>
+                <div className={styles.summaryValue}>{selectedRun.event_count}</div>
+              </div>
+              <div className={styles.summaryCard}>
+                <div className={styles.summaryLabel}>Tool Records</div>
+                <div className={styles.summaryValue}>{toolRecords.length}</div>
+              </div>
+              <div className={styles.summaryCard}>
+                <div className={styles.summaryLabel}>Memory Writes</div>
+                <div className={styles.summaryValue}>{longTermMemoryWrites.length}</div>
+              </div>
+              <div className={styles.summaryCard}>
+                <div className={styles.summaryLabel}>Session Resources</div>
+                <div className={styles.summaryValue}>{sessionResourceHandles.length}</div>
+              </div>
+              <div className={styles.summaryCard}>
+                <div className={styles.summaryLabel}>Turn Resources</div>
+                <div className={styles.summaryValue}>{transientResourceHandles.length}</div>
+              </div>
+            </div>
+
+            <div className={styles.stateGrid}>
+              <div className={styles.detailSection}>
+                <div className={styles.detailSectionTitle}>Run Metadata</div>
+                <div className={styles.detailMeta}>
+                  <div className={styles.detailMetaRow}>
+                    <span className={styles.detailMetaLabel}>Run:</span>{" "}
+                    {selectedRunIndex >= 0 ? sessionRunLabel(selectedRunIndex) : "Selected Run"} · #
+                    {selectedRun.id}
+                  </div>
+                  <div className={styles.detailMetaRow}>
+                    <span className={styles.detailMetaLabel}>Assistant Message:</span>{" "}
+                    {selectedRun.assistant_message_id ? `#${selectedRun.assistant_message_id}` : "None"}
+                  </div>
+                  <div className={styles.detailMetaRow}>
+                    <span className={styles.detailMetaLabel}>Created:</span>{" "}
+                    {formatDate(selectedRun.created_at)}
+                  </div>
+                  <div className={styles.detailMetaRow}>
+                    <span className={styles.detailMetaLabel}>Updated:</span>{" "}
+                    {formatDate(selectedRun.updated_at)}
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.detailSection}>
+                <div className={styles.detailSectionTitle}>Context Sync</div>
+                <div className={styles.detailMeta}>
+                  <div className={styles.detailMetaRow}>
+                    <span className={styles.detailMetaLabel}>Applied:</span>{" "}
+                    {asString(selectedContextSync.applied) || "Unknown"}
+                  </div>
+                  <div className={styles.detailMetaRow}>
+                    <span className={styles.detailMetaLabel}>Context Version:</span>{" "}
+                    {asString(selectedContextSync.context_version) || "Not recorded"}
+                  </div>
+                  <div className={styles.detailMetaRow}>
+                    <span className={styles.detailMetaLabel}>Provider:</span>{" "}
+                    {asString(selectedProvider.name) || "Unknown"}
+                    {asString(selectedProvider.model) ? ` · ${asString(selectedProvider.model)}` : ""}
+                  </div>
+                  <div className={styles.detailMetaRow}>
+                    <span className={styles.detailMetaLabel}>Payload Version:</span>{" "}
+                    {asNumber(selectedDebugPayload.version) ?? "Not recorded"}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {renderRecordListSection(
+              "Turn Messages",
+              asRecordList(selectedTurnInput.messages),
+              "No turn messages recorded."
+            )}
+            {renderRecordListSection(
+              "Session Resource Handles",
+              sessionResourceHandles,
+              "No session resources were visible to this run."
+            )}
+            {renderRecordListSection(
+              "Transient Resource Handles",
+              transientResourceHandles,
+              "No transient resources were attached to this run."
+            )}
+            {renderRecordListSection(
+              "Active Skills",
+              activeSkills,
+              "No active skills recorded for this run."
+            )}
+            {renderRecordListSection(
+              "Available Tools",
+              availableTools,
+              "No tool definitions recorded for this run."
+            )}
+            {renderRecordListSection(
+              "Tool Records",
+              toolRecords,
+              "No tool records captured for this run."
+            )}
+            {renderRecordListSection(
+              "Long-Term Memory Writes",
+              longTermMemoryWrites,
+              "No long-term memory writes were recorded for this run."
+            )}
+            {renderJsonSection(
+              "Memory Pack",
+              memoryPack,
+              "No memory pack was captured for this run."
+            )}
+            {renderJsonSection(
+              "Runtime Snapshot",
+              selectedRuntimeSnapshot,
+              "No runtime snapshot was captured for this run."
+            )}
+            {renderJsonSection(
+              "Artifacts",
+              selectedArtifacts,
+              "No runtime artifacts were captured for this run."
+            )}
+            {renderJsonSection(
+              "Usage",
+              selectedUsage,
+              "No usage payload was captured for this run."
+            )}
+            {renderJsonSection(
+              "Error",
+              selectedError,
+              "No error payload recorded for this run."
+            )}
+            {renderJsonSection(
+              "Raw Run Debug Payload",
+              selectedRun.debug_payload,
+              "No debug payload recorded for this run."
+            )}
+            {renderJsonSection(
+              "Runtime Link During Run",
+              selectedRuntimeLink,
+              "No runtime link payload captured for this run."
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  function renderLongTermMemoryTab() {
+    if (!detail) return null;
+
+    const typeCounts = detail.long_term_memory_records.reduce<Record<string, number>>((acc, record) => {
+      acc[record.memory_type] = (acc[record.memory_type] ?? 0) + 1;
+      return acc;
+    }, {});
+
+    return (
+      <div className={styles.tabPanel}>
+        <div className={styles.summaryGrid}>
+          <div className={styles.summaryCard}>
+            <div className={styles.summaryLabel}>Persisted Records</div>
+            <div className={styles.summaryValue}>{detail.long_term_memory_records.length}</div>
+          </div>
+          <div className={styles.summaryCard}>
+            <div className={styles.summaryLabel}>Latest Run Writes</div>
+            <div className={styles.summaryValue}>{longTermMemoryWrites.length}</div>
+          </div>
+          <div className={styles.summaryCard}>
+            <div className={styles.summaryLabel}>Preferences</div>
+            <div className={styles.summaryValue}>{typeCounts.preference ?? 0}</div>
+          </div>
+          <div className={styles.summaryCard}>
+            <div className={styles.summaryLabel}>Session Insights</div>
+            <div className={styles.summaryValue}>{typeCounts.session_insight ?? 0}</div>
+          </div>
+        </div>
+
+        {renderRecordListSection(
+          "Persisted Long-Term Memory",
+          detail.long_term_memory_records.map((record) => ({
+            id: record.id,
+            memory_type: record.memory_type,
+            scope: record.scope,
+            content: record.content,
+            summary: record.summary ?? undefined,
+            importance: record.importance,
+            confidence: record.confidence,
+            source_run_id: record.source_run_id ?? undefined,
+            related_target_id: record.related_target_id ?? undefined,
+            status: record.status,
+            tags: record.tags,
+          })),
+          "No long-term memory records stored for this session."
+        )}
+        {renderJsonSection(
+          "Latest Run Memory Writes",
+          longTermMemoryWrites,
+          "No memory writes were captured for the selected run."
+        )}
+      </div>
+    );
+  }
+
+  function renderShortTermMemoryTab() {
     if (!detail) return null;
 
     return (
@@ -486,27 +873,27 @@ export default function DataConversationsPage() {
           <div className={styles.summaryCard}>
             <div className={styles.summaryLabel}>Recent Requests</div>
             <div className={styles.summaryValue}>
-              {asStringList(stateGoal.recent_user_requests).length}
+              {asStringList(shortTermMemoryGoal.recent_user_requests).length}
             </div>
           </div>
           <div className={styles.summaryCard}>
             <div className={styles.summaryLabel}>Completed Work</div>
             <div className={styles.summaryValue}>
-              {asStringList(stateProgress.completed_work).length}
+              {asStringList(shortTermMemoryProgress.completed_work).length}
             </div>
           </div>
           <div className={styles.summaryCard}>
             <div className={styles.summaryLabel}>Artifacts</div>
             <div className={styles.summaryValue}>
-              {asRecordList(stateArtifacts.sources).length +
-                asRecordList(stateArtifacts.visited_pages).length +
-                asRecordList(stateArtifacts.pdfs).length}
+              {asRecordList(shortTermMemoryArtifacts.sources).length +
+                asRecordList(shortTermMemoryArtifacts.visited_pages).length +
+                asRecordList(shortTermMemoryArtifacts.pdfs).length}
             </div>
           </div>
           <div className={styles.summaryCard}>
             <div className={styles.summaryLabel}>Recent Turns</div>
             <div className={styles.summaryValue}>
-              {asRecordList(stateProgress.recent_turns).length}
+              {asRecordList(shortTermMemoryProgress.recent_turns).length}
             </div>
           </div>
         </div>
@@ -515,95 +902,96 @@ export default function DataConversationsPage() {
           <div className={styles.detailSection}>
             <div className={styles.detailSectionTitle}>Core User Need</div>
             <div className={styles.detailBox}>
-              {asString(stateGoal.core_user_need) || "No core need recorded."}
+              {asString(shortTermMemoryGoal.core_user_need) || "No core need recorded."}
             </div>
           </div>
           <div className={styles.detailSection}>
             <div className={styles.detailSectionTitle}>Current Focus</div>
             <div className={styles.detailBox}>
-              {asString(stateGoal.current_focus) || "No current focus recorded."}
+              {asString(shortTermMemoryGoal.current_focus) || "No current focus recorded."}
             </div>
           </div>
         </div>
 
         {renderStringListSection(
           "Recent User Requests",
-          asStringList(stateGoal.recent_user_requests),
+          asStringList(shortTermMemoryGoal.recent_user_requests),
           "No recent requests recorded."
         )}
         {renderStringListSection(
           "Completed Work",
-          asStringList(stateProgress.completed_work),
+          asStringList(shortTermMemoryProgress.completed_work),
           "No completed work recorded."
         )}
         {renderStringListSection(
           "Pending Actions",
-          asStringList(stateProgress.pending_actions),
+          asStringList(shortTermMemoryProgress.pending_actions),
           "No pending actions recorded."
         )}
         {renderStringListSection(
           "Open Questions",
-          asStringList(stateProgress.open_questions),
+          asStringList(shortTermMemoryProgress.open_questions),
           "No open questions recorded."
         )}
 
         <div className={styles.detailSection}>
           <div className={styles.detailSectionTitle}>Last Assistant Summary</div>
           <div className={styles.detailBox}>
-            {asString(stateProgress.last_assistant_summary) || "No assistant summary recorded."}
+            {asString(shortTermMemoryProgress.last_assistant_summary) ||
+              "No assistant summary recorded."}
           </div>
         </div>
 
         {renderRecordListSection(
           "Recent Turns",
-          asRecordList(stateProgress.recent_turns),
+          asRecordList(shortTermMemoryProgress.recent_turns),
           "No turns recorded."
         )}
         {renderRecordListSection(
           "Sources",
-          asRecordList(stateArtifacts.sources),
+          asRecordList(shortTermMemoryArtifacts.sources),
           "No sources recorded."
         )}
         {renderRecordListSection(
           "Visited Pages",
-          asRecordList(stateArtifacts.visited_pages),
+          asRecordList(shortTermMemoryArtifacts.visited_pages),
           "No visited pages recorded."
         )}
         {renderRecordListSection(
           "PDFs",
-          asRecordList(stateArtifacts.pdfs),
+          asRecordList(shortTermMemoryArtifacts.pdfs),
           "No PDFs recorded."
         )}
         {renderRecordListSection(
           "School Searches",
-          asRecordList(stateArtifacts.school_searches),
+          asRecordList(shortTermMemoryArtifacts.school_searches),
           "No school searches recorded."
         )}
         {renderRecordListSection(
           "Question Searches",
-          asRecordList(stateArtifacts.question_searches),
+          asRecordList(shortTermMemoryArtifacts.question_searches),
           "No question searches recorded."
         )}
         {renderRecordListSection(
           "Fetched Questions",
-          asRecordList(stateArtifacts.fetched_questions),
+          asRecordList(shortTermMemoryArtifacts.fetched_questions),
           "No fetched questions recorded."
         )}
         {renderRecordListSection(
           "PDF Queries",
-          asRecordList(stateArtifacts.pdf_queries),
+          asRecordList(shortTermMemoryArtifacts.pdf_queries),
           "No PDF queries recorded."
         )}
         {renderRecordListSection(
           "Notes",
-          asRecordList(stateArtifacts.notes),
+          asRecordList(shortTermMemoryArtifacts.notes),
           "No notes recorded."
         )}
-
-        <details className={styles.rawDetails}>
-          <summary className={styles.rawSummary}>View raw session state JSON</summary>
-          <pre className={styles.rawPre}>{stringifyJson(detail.state)}</pre>
-        </details>
+        {renderJsonSection(
+          "Raw Short-Term Memory",
+          detail.short_term_memory,
+          "No short-term memory payload stored."
+        )}
       </div>
     );
   }
@@ -613,68 +1001,43 @@ export default function DataConversationsPage() {
 
     return (
       <div className={styles.tabPanel}>
-        {detail.runs.length === 0 ? (
+        {renderRunSelector()}
+
+        {!selectedRun ? (
           <div className={styles.emptyState}>No runs stored.</div>
+        ) : selectedRun.events.length === 0 ? (
+          <div className={styles.emptyState}>No events recorded for the selected run.</div>
         ) : (
-          <div className={styles.runList}>
-            {detail.runs.map((run, index) => (
-              <div key={run.id} className={styles.runItem}>
-                <div className={styles.runHeader}>
-                  <span className={styles.runTitle}>{sessionRunLabel(index)}</span>
-                  <span className={`${styles.statusBadge} ${statusClass(run.status)}`}>
-                    {run.status}
-                  </span>
-                </div>
-                <div className={styles.runMeta}>
-                  <span>DB #{run.id}</span>
-                  <span>{run.event_count} events</span>
-                  <span>created {formatDate(run.created_at)}</span>
-                  <span>updated {formatDate(run.updated_at)}</span>
+          <div className={styles.eventList}>
+            {selectedRun.events.map((event) => (
+              <div key={event.id} className={styles.eventItem}>
+                <div className={styles.eventHeader}>
+                  <div className={styles.eventTitle}>{eventLabel(event)}</div>
+                  <div className={styles.eventMeta}>
+                    seq {event.sequence} | {formatDate(event.created_at)}
+                  </div>
                 </div>
 
-                {run.events.length === 0 ? (
-                  <div className={styles.emptyState}>No events recorded for this run.</div>
-                ) : (
-                  <div className={styles.eventList}>
-                    {run.events.map((event) => (
-                      <div key={event.id} className={styles.eventItem}>
-                        <div className={styles.eventHeader}>
-                          <div className={styles.eventTitle}>{eventLabel(event)}</div>
-                          <div className={styles.eventMeta}>
-                            seq {event.sequence} | {formatDate(event.created_at)}
-                          </div>
-                        </div>
+                {eventSummary(event) && <div className={styles.eventBody}>{eventSummary(event)}</div>}
 
-                        {eventSummary(event) && (
-                          <div className={styles.eventBody}>{eventSummary(event)}</div>
-                        )}
-
-                        {isRecord(event.payload.args) && (
-                          <div className={styles.eventSubsection}>
-                            <div className={styles.eventSubsectionLabel}>Args</div>
-                            <pre className={styles.rawPre}>
-                              {stringifyJson(event.payload.args)}
-                            </pre>
-                          </div>
-                        )}
-
-                        {isRecord(event.payload.resource) && (
-                          <div className={styles.eventSubsection}>
-                            <div className={styles.eventSubsectionLabel}>Resource</div>
-                            <pre className={styles.rawPre}>
-                              {stringifyJson(event.payload.resource)}
-                            </pre>
-                          </div>
-                        )}
-
-                        <details className={styles.rawDetails}>
-                          <summary className={styles.rawSummary}>View raw payload</summary>
-                          <pre className={styles.rawPre}>{stringifyJson(event.payload)}</pre>
-                        </details>
-                      </div>
-                    ))}
+                {isRecord(event.payload.args) && (
+                  <div className={styles.eventSubsection}>
+                    <div className={styles.eventSubsectionLabel}>Args</div>
+                    <pre className={styles.rawPre}>{stringifyJson(event.payload.args)}</pre>
                   </div>
                 )}
+
+                {isRecord(event.payload.resource) && (
+                  <div className={styles.eventSubsection}>
+                    <div className={styles.eventSubsectionLabel}>Resource</div>
+                    <pre className={styles.rawPre}>{stringifyJson(event.payload.resource)}</pre>
+                  </div>
+                )}
+
+                <details className={styles.rawDetails}>
+                  <summary className={styles.rawSummary}>View raw payload</summary>
+                  <pre className={styles.rawPre}>{stringifyJson(event.payload)}</pre>
+                </details>
               </div>
             ))}
           </div>
@@ -714,7 +1077,9 @@ export default function DataConversationsPage() {
   }
 
   function renderActiveTab() {
-    if (activeTab === "state") return renderStateTab();
+    if (activeTab === "runInspector") return renderRunInspectorTab();
+    if (activeTab === "longTermMemory") return renderLongTermMemoryTab();
+    if (activeTab === "shortTermMemory") return renderShortTermMemoryTab();
     if (activeTab === "timeline") return renderTimelineTab();
     if (activeTab === "messages") return renderMessagesTab();
     return renderOverviewTab();
@@ -725,8 +1090,8 @@ export default function DataConversationsPage() {
       <div className={styles.pageIntro}>
         <h2 className={styles.pageTitle}>Conversations</h2>
         <p className={styles.description}>
-          Inspect stored chat sessions, session state, and tool timelines so this page can work as
-          both a cleanup surface and a debugging console.
+          Inspect chat sessions from the new AgentRuntime architecture: runtime link, host context
+          state, run debug payloads, short-term memory, and derived long-term memory.
         </p>
       </div>
 
@@ -795,9 +1160,7 @@ export default function DataConversationsPage() {
         <div className={`glass-card ${styles.detailCard}`}>
           <div className={styles.listHeader}>
             <h3 className={styles.detailTitle}>Conversation Inspector</h3>
-            {selectedListItem && (
-              <span className={styles.listCount}>Session #{selectedListItem.id}</span>
-            )}
+            {selectedListItem && <span className={styles.listCount}>Session #{selectedListItem.id}</span>}
           </div>
 
           {selectedSessionId == null ? (
@@ -822,12 +1185,10 @@ export default function DataConversationsPage() {
                   <span className={styles.detailMetaLabel}>Title:</span> {detail.title}
                 </div>
                 <div className={styles.detailMetaRow}>
-                  <span className={styles.detailMetaLabel}>Created:</span>{" "}
-                  {formatDate(detail.created_at)}
+                  <span className={styles.detailMetaLabel}>Created:</span> {formatDate(detail.created_at)}
                 </div>
                 <div className={styles.detailMetaRow}>
-                  <span className={styles.detailMetaLabel}>Updated:</span>{" "}
-                  {formatDate(detail.updated_at)}
+                  <span className={styles.detailMetaLabel}>Updated:</span> {formatDate(detail.updated_at)}
                 </div>
                 {detailLoading && <div className={styles.muted}>Refreshing detail...</div>}
               </div>
@@ -837,9 +1198,7 @@ export default function DataConversationsPage() {
                   <button
                     key={tab.id}
                     type="button"
-                    className={`${styles.tabButton} ${
-                      activeTab === tab.id ? styles.tabButtonActive : ""
-                    }`}
+                    className={`${styles.tabButton} ${activeTab === tab.id ? styles.tabButtonActive : ""}`}
                     onClick={() => setActiveTab(tab.id)}
                   >
                     {tab.label}

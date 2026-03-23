@@ -17,7 +17,7 @@ from app.schemas.chat import (
     ChatSessionOut,
     ChatSessionPdfResourceOut,
 )
-from app.services.chat_service import ChatService
+from app.services.conversation_service import ConversationService
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ async def send_message(
     req: ChatRequest,
     session: AsyncSession = Depends(get_session),
 ) -> ChatResponseOut | StreamingResponse:
-    service = ChatService(session)
+    service = ConversationService(session)
 
     if req.stream:
         try:
@@ -118,7 +118,11 @@ async def get_session_detail(
             )
             for run in chat_session.runs
         ],
-        state=json.loads(chat_session.state.payload) if chat_session.state is not None else {},
+        short_term_memory=(
+            json.loads(chat_session.short_term_memory.payload)
+            if chat_session.short_term_memory is not None
+            else {}
+        ),
     )
 
 
@@ -127,8 +131,8 @@ async def delete_session(
     session_id: int,
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    repo = ConversationRepository(session)
-    deleted = await repo.delete_session(session_id)
+    service = ConversationService(session)
+    deleted = await service.delete_session(session_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")
 

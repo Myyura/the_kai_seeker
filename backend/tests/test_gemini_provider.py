@@ -8,13 +8,13 @@ def test_gemini_provider_concatenates_multiple_system_messages() -> None:
     contents, system_text = provider._build_contents(
         [
             ProviderMessage(role="system", content="base system"),
-            ProviderMessage(role="system", content="session state"),
+            ProviderMessage(role="system", content="short-term memory"),
             ProviderMessage(role="user", content="hello"),
             ProviderMessage(role="assistant", content="hi"),
         ]
     )
 
-    assert system_text == "base system\n\nsession state"
+    assert system_text == "base system\n\nshort-term memory"
     assert contents == [
         {"role": "user", "parts": [{"text": "hello"}]},
         {"role": "model", "parts": [{"text": "hi"}]},

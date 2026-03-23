@@ -9,10 +9,11 @@ from sqlalchemy.orm import selectinload
 from app.models.conversation import (
     ChatMessage,
     ChatRun,
+    ChatRunDebugPayload,
     ChatRunEvent,
     ChatSession,
     ChatSessionPdfResource,
-    ChatSessionState,
+    ChatSessionShortTermMemory,
 )
 from app.models.pdf_document import PdfDocument
 
@@ -41,7 +42,7 @@ class ConversationRepository:
 
     async def create_session(self, title: str = "New Chat", *, commit: bool = True) -> ChatSession:
         chat_session = ChatSession(title=title)
-        chat_session.state = ChatSessionState(payload="{}")
+        chat_session.short_term_memory = ChatSessionShortTermMemory(payload="{}")
         self.session.add(chat_session)
         await self.session.flush()
         if commit:
@@ -124,7 +125,10 @@ class ConversationRepository:
                 selectinload(ChatSession.messages),
                 selectinload(ChatSession.pdf_resources),
                 selectinload(ChatSession.runs).selectinload(ChatRun.events),
-                selectinload(ChatSession.state),
+                selectinload(ChatSession.runs).selectinload(ChatRun.debug_payload),
+                selectinload(ChatSession.short_term_memory),
+                selectinload(ChatSession.runtime_link),
+                selectinload(ChatSession.runtime_snapshots),
             )
         )
         result = await self.session.execute(stmt)
@@ -139,12 +143,13 @@ class ConversationRepository:
         await self.session.refresh(chat_session)
         return chat_session
 
-    async def delete_session(self, session_id: int) -> bool:
+    async def delete_session(self, session_id: int, *, commit: bool = True) -> bool:
         chat_session = await self.session.get(ChatSession, session_id)
         if chat_session is None:
             return False
         await self.session.delete(chat_session)
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
         return True
 
     async def add_message(
@@ -273,6 +278,28 @@ class ConversationRepository:
         if commit:
             await self.session.commit()
         return created
+
+    async def save_run_debug_payload(
+        self,
+        run_id: int,
+        payload: dict[str, Any],
+        *,
+        commit: bool = True,
+    ) -> ChatRunDebugPayload:
+        stmt = select(ChatRunDebugPayload).where(ChatRunDebugPayload.run_id == run_id)
+        existing = (await self.session.execute(stmt)).scalar_one_or_none()
+        payload_text = json.dumps(payload, ensure_ascii=False)
+        if existing is None:
+            existing = ChatRunDebugPayload(run_id=run_id, payload=payload_text)
+            self.session.add(existing)
+        else:
+            existing.payload = payload_text
+
+        await self.session.flush()
+        if commit:
+            await self.session.commit()
+            await self.session.refresh(existing)
+        return existing
 
     async def update_run(
         self,
@@ -419,39 +446,41 @@ class ConversationRepository:
             for res, doc in rows
         ]
 
-    async def get_or_create_session_state(
+    async def get_or_create_short_term_memory(
         self,
         session_id: int,
         *,
         commit: bool = True,
-    ) -> ChatSessionState:
-        stmt = select(ChatSessionState).where(ChatSessionState.session_id == session_id)
+    ) -> ChatSessionShortTermMemory:
+        stmt = select(ChatSessionShortTermMemory).where(
+            ChatSessionShortTermMemory.session_id == session_id
+        )
         existing = (await self.session.execute(stmt)).scalar_one_or_none()
         if existing is not None:
             return existing
 
-        state = ChatSessionState(session_id=session_id, payload="{}")
-        self.session.add(state)
+        short_term_memory = ChatSessionShortTermMemory(session_id=session_id, payload="{}")
+        self.session.add(short_term_memory)
         await self.session.flush()
         if commit:
             await self.session.commit()
-            await self.session.refresh(state)
-        return state
+            await self.session.refresh(short_term_memory)
+        return short_term_memory
 
-    async def update_session_state(
+    async def update_short_term_memory(
         self,
         session_id: int,
         payload: str,
         *,
         commit: bool = True,
         touch_session: bool = True,
-    ) -> ChatSessionState:
-        state = await self.get_or_create_session_state(session_id, commit=False)
-        state.payload = payload
+    ) -> ChatSessionShortTermMemory:
+        short_term_memory = await self.get_or_create_short_term_memory(session_id, commit=False)
+        short_term_memory.payload = payload
         if touch_session:
             await self.touch_session(session_id, commit=False)
         await self.session.flush()
         if commit:
             await self.session.commit()
-            await self.session.refresh(state)
-        return state
+            await self.session.refresh(short_term_memory)
+        return short_term_memory

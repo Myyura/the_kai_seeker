@@ -29,6 +29,9 @@ dev = [
     "ruff>=0.9",
 ]
 
+[project.scripts]
+kai-tool = "app.tools.cli:main"
+
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"

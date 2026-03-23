@@ -128,6 +128,7 @@ class WebFetchTool(BaseTool):
                 if abs_url and abs_url not in seen:
                     seen.add(abs_url)
                     links.append(abs_url)
+                a["href"] = abs_url
 
             markdown = md(
                 str(soup),

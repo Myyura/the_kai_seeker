@@ -5,14 +5,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.engine import get_session
 from app.repositories.conversation_repo import ConversationRepository
+from app.repositories.long_term_memory_repo import LongTermMemoryRepository
 from app.repositories.provider_repo import ProviderRepository
 from app.repositories.study_target_repo import StudyTargetRepository
 from app.schemas.admin import (
     AdminConversationDetailOut,
     AdminConversationListItemOut,
+    AdminConversationLongTermMemoryOut,
     AdminConversationListOut,
     AdminConversationMessageOut,
     AdminConversationPdfOut,
+    AdminConversationRuntimeSnapshotOut,
     AdminConversationRunEventOut,
     AdminConversationRunOut,
     AdminPdfChunksOut,
@@ -30,6 +33,7 @@ from app.schemas.admin import (
     AdminStudyTargetListOut,
 )
 from app.schemas.pdf import PdfProcessOut
+from app.services.conversation_service import ConversationService
 from app.services.pdf_service import PdfService
 
 router = APIRouter()
@@ -77,6 +81,26 @@ def _mask_api_key(secret: str) -> str:
     return f"{secret[:4]}...{secret[-2:]}"
 
 
+def _parse_json_payload(raw: str | None) -> dict:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _parse_json_list(raw: str | None) -> list:
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
 @router.get("/resources", response_model=AdminResourcesOut)
 async def list_admin_resources() -> AdminResourcesOut:
     return AdminResourcesOut(resources=ADMIN_RESOURCES)
@@ -102,11 +126,13 @@ async def get_admin_conversation_detail(
     session: AsyncSession = Depends(get_session),
 ) -> AdminConversationDetailOut:
     repo = ConversationRepository(session)
+    memory_repo = LongTermMemoryRepository(session)
     chat_session = await repo.get_session(session_id)
     if chat_session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
     pdf_resources = await repo.list_session_pdf_resources(session_id)
+    long_term_memory_records = await memory_repo.list_by_source_session(session_id)
     return AdminConversationDetailOut(
         id=chat_session.id,
         title=chat_session.title,
@@ -141,11 +167,55 @@ async def get_admin_conversation_detail(
                     )
                     for event in run.events
                 ],
+                debug_payload=_parse_json_payload(run.debug_payload.payload if run.debug_payload else None),
             )
             for run in chat_session.runs
         ],
         pdf_resources=[AdminConversationPdfOut.model_validate(item) for item in pdf_resources],
-        state=json.loads(chat_session.state.payload) if chat_session.state is not None else {},
+        runtime_link=(
+            {
+                "runtime_name": chat_session.runtime_link.runtime_name,
+                "runtime_session_id": chat_session.runtime_link.runtime_session_id,
+                "runtime_conversation_id": chat_session.runtime_link.runtime_conversation_id,
+                "base_system_prompt": chat_session.runtime_link.base_system_prompt,
+                "status": chat_session.runtime_link.status,
+                "metadata": _parse_json_payload(chat_session.runtime_link.metadata_json),
+            }
+            if chat_session.runtime_link is not None
+            else {}
+        ),
+        runtime_snapshots=[
+            AdminConversationRuntimeSnapshotOut(
+                id=snapshot.id,
+                created_at=snapshot.created_at,
+                payload=_parse_json_payload(snapshot.snapshot_payload),
+            )
+            for snapshot in chat_session.runtime_snapshots
+        ],
+        long_term_memory_records=[
+            AdminConversationLongTermMemoryOut(
+                id=record.id,
+                memory_type=record.memory_type,
+                scope=record.scope,
+                content=record.content,
+                summary=record.summary,
+                importance=record.importance,
+                confidence=record.confidence,
+                related_target_id=record.related_target_id,
+                source_session_id=record.source_session_id,
+                source_run_id=record.source_run_id,
+                tags=_parse_json_list(record.tags),
+                status=record.status,
+                created_at=record.created_at,
+                updated_at=record.updated_at,
+            )
+            for record in long_term_memory_records
+        ],
+        short_term_memory=(
+            json.loads(chat_session.short_term_memory.payload)
+            if chat_session.short_term_memory is not None
+            else {}
+        ),
     )
 
 
@@ -154,8 +224,8 @@ async def delete_admin_conversation(
     session_id: int,
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    repo = ConversationRepository(session)
-    deleted = await repo.delete_session(session_id)
+    service = ConversationService(session)
+    deleted = await service.delete_session(session_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")
 

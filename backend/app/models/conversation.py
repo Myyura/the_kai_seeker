@@ -31,10 +31,20 @@ class ChatSession(Base):
     runs: Mapped[list["ChatRun"]] = relationship(
         back_populates="session", cascade="all, delete-orphan", order_by="ChatRun.id"
     )
-    state: Mapped["ChatSessionState | None"] = relationship(
+    short_term_memory: Mapped["ChatSessionShortTermMemory | None"] = relationship(
         back_populates="session",
         cascade="all, delete-orphan",
         uselist=False,
+    )
+    runtime_link: Mapped["AgentRuntimeLink | None"] = relationship(
+        back_populates="session",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    runtime_snapshots: Mapped[list["AgentRuntimeSnapshotRecord"]] = relationship(
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="AgentRuntimeSnapshotRecord.id",
     )
 
 
@@ -83,6 +93,11 @@ class ChatRun(Base):
     events: Mapped[list["ChatRunEvent"]] = relationship(
         back_populates="run", cascade="all, delete-orphan", order_by="ChatRunEvent.sequence"
     )
+    debug_payload: Mapped["ChatRunDebugPayload | None"] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
 
 class ChatRunEvent(Base):
@@ -103,6 +118,29 @@ class ChatRunEvent(Base):
     )
 
     run: Mapped["ChatRun"] = relationship(back_populates="events")
+
+
+class ChatRunDebugPayload(Base):
+    """Persisted run-level debug payload for AgentRuntime inspection."""
+
+    __tablename__ = "chat_run_debug_payloads"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("chat_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    run: Mapped["ChatRun"] = relationship(back_populates="debug_payload")
 
 
 class ChatSessionPdfResource(Base):
@@ -127,10 +165,10 @@ class ChatSessionPdfResource(Base):
     session: Mapped["ChatSession"] = relationship(back_populates="pdf_resources")
 
 
-class ChatSessionState(Base):
-    """Structured session memory used to rebuild prompt context."""
+class ChatSessionShortTermMemory(Base):
+    """Structured short-term memory used by the native AgentRuntime."""
 
-    __tablename__ = "chat_session_states"
+    __tablename__ = "chat_session_short_term_memories"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     session_id: Mapped[int] = mapped_column(
@@ -147,4 +185,4 @@ class ChatSessionState(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    session: Mapped["ChatSession"] = relationship(back_populates="state")
+    session: Mapped["ChatSession"] = relationship(back_populates="short_term_memory")

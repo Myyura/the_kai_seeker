@@ -1,4 +1,4 @@
-from app.services.chat_service import ChatService
+from app.services.conversation_service import ConversationService
 from app.tools.builtin.fetch_pdf_and_upload import (
     _derive_pdf_filename,
     _parse_content_disposition_filename,
@@ -31,5 +31,5 @@ def test_web_fetch_html_to_markdown_preserves_links() -> None:
 
 def test_parse_fetch_pdf_tool_result() -> None:
     payload = '{"pdf_id": 11, "source_url": "https://example.com/a.pdf"}'
-    parsed = ChatService._parse_fetch_pdf_tool_result(payload)
+    parsed = ConversationService._parse_fetch_pdf_tool_result(payload)
     assert parsed == {"pdf_id": 11, "source_url": "https://example.com/a.pdf"}

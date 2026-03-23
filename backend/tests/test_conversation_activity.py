@@ -4,7 +4,7 @@ from app.repositories.conversation_repo import ConversationRepository
 from app.repositories.provider_repo import ProviderRepository
 from app.schemas.chat import ChatMessageIn
 from app.schemas.provider import ProviderSettingCreate
-from app.services.chat_service import ChatService
+from app.services.conversation_service import ConversationService
 
 
 @pytest.mark.asyncio
@@ -40,7 +40,6 @@ async def test_chat_non_stream_batches_commits_per_turn(
         )
     )
 
-    service = ChatService(db_session)
     commit_count = 0
     original_commit = db_session.commit
 
@@ -70,8 +69,8 @@ async def test_chat_non_stream_batches_commits_per_turn(
             ],
         )
 
+    service = ConversationService(db_session, tool_loop_runner=fake_run_agent_loop)
     monkeypatch.setattr(db_session, "commit", counted_commit)
-    monkeypatch.setattr("app.services.chat_service.run_agent_loop", fake_run_agent_loop)
 
     await service.chat([ChatMessageIn(role="user", content="say hi")])
 
@@ -93,7 +92,6 @@ async def test_chat_stream_flushes_events_in_batches(
         )
     )
 
-    service = ChatService(db_session)
     commit_count = 0
     original_commit = db_session.commit
 
@@ -146,8 +144,8 @@ async def test_chat_stream_flushes_events_in_batches(
             ],
         )
 
+    service = ConversationService(db_session, tool_loop_runner=fake_run_agent_loop)
     monkeypatch.setattr(db_session, "commit", counted_commit)
-    monkeypatch.setattr("app.services.chat_service.run_agent_loop", fake_run_agent_loop)
 
     event_iter, _sid = await service.chat_stream([ChatMessageIn(role="user", content="say hi")])
     _events = [event async for event in event_iter]

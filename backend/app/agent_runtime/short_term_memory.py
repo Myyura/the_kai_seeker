@@ -1,4 +1,4 @@
-"""Structured chat session state reducer and prompt renderer."""
+"""Structured short-term memory reducer and prompt renderer for NativeAgentRuntime."""
 
 import json
 import re
@@ -20,7 +20,7 @@ MAX_PDF_QUERIES = 12
 MAX_NOTES = 20
 
 
-class SessionStateService:
+class ShortTermMemoryService:
     def default_state(self) -> dict[str, Any]:
         return {
             "version": 1,

@@ -1,9 +1,10 @@
 import pytest
 
+from app.agent_runtime.native import NativeAgentRuntime
 from app.providers.base import BaseLLMProvider, ChatResponse, ProviderMessage
-from app.services.agent import build_prompt_context, run_agent_loop
-from app.skills.base import Skill
-from app.skills.registry import skill_registry
+from app.agent_runtime.native_loop import run_native_agent_loop
+from app.agent_runtime.tool_bridge import ToolBridge
+from app.agent_runtime.types import HostContextState, MemoryPack, SkillDefinition
 from app.tools.base import BaseTool, ToolResult
 from app.tools.registry import tool_registry
 
@@ -62,35 +63,41 @@ class FakeProvider(BaseLLMProvider):
 @pytest.fixture(autouse=True)
 def restore_registries():
     original_tools = dict(tool_registry._tools)
-    original_skills = dict(skill_registry._skills)
     try:
         tool_registry.clear()
-        skill_registry.clear()
         yield
     finally:
         tool_registry.clear()
         tool_registry._tools.update(original_tools)
-        skill_registry.clear()
-        skill_registry._skills.update(original_skills)
 
 
-def test_build_prompt_context_filters_tools_by_allowed_tools() -> None:
+def test_native_runtime_tool_policy_filters_tools_by_allowed_tools() -> None:
     tool_registry.register(EchoTool())
     tool_registry.register(OtherTool())
-    skill_registry.register(
-        Skill(
-            name="restricted",
-            display_name="Restricted",
-            description="Limit tools",
-            body="Use only echo.",
-            trigger="restricted",
-            allowed_tools=["echo"],
-        )
+
+    runtime = NativeAgentRuntime(
+        provider=FakeProvider([]),
+        stored_messages=[],
+        stored_runs=[],
+        initial_short_term_memory_payload="{}",
     )
+    state = HostContextState.build(
+        memory_pack=MemoryPack(),
+        tool_definitions=ToolBridge().build_definitions(),
+        skill_definitions=[
+            SkillDefinition(
+                name="restricted",
+                description="Limit tools",
+                prompt_block="Use only echo.",
+                allowed_tools=["echo"],
+            )
+        ],
+        session_resource_handles=[],
+    )
+    runtime.host_context_state = state
 
-    prompt, allowed_tool_names = build_prompt_context("this is a restricted task")
-
-    assert allowed_tool_names == {"echo"}
+    prompt = runtime._render_tool_policy_section(state.tool_definitions)
+    assert runtime._resolve_allowed_tool_names() == {"echo"}
     assert "**echo**" in prompt
     assert "other_tool" not in prompt
 
@@ -107,7 +114,7 @@ async def test_run_agent_loop_rejects_disallowed_tools() -> None:
         ]
     )
 
-    final_answer, tool_call_log = await run_agent_loop(
+    final_answer, tool_call_log = await run_native_agent_loop(
         provider,
         [ProviderMessage(role="user", content="hello")],
         allowed_tool_names={"echo"},

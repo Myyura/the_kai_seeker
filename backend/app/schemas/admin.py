@@ -48,6 +48,7 @@ class AdminConversationRunOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     events: list["AdminConversationRunEventOut"] = Field(default_factory=list)
+    debug_payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class AdminConversationRunEventOut(BaseModel):
@@ -66,6 +67,29 @@ class AdminConversationPdfOut(BaseModel):
     source_url: str | None = None
 
 
+class AdminConversationRuntimeSnapshotOut(BaseModel):
+    id: int
+    created_at: datetime
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class AdminConversationLongTermMemoryOut(BaseModel):
+    id: int
+    memory_type: str
+    scope: str
+    content: str
+    summary: str | None = None
+    importance: float
+    confidence: float
+    related_target_id: int | None = None
+    source_session_id: int | None = None
+    source_run_id: int | None = None
+    tags: list[str] = Field(default_factory=list)
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
 class AdminConversationDetailOut(BaseModel):
     id: int
     title: str
@@ -74,7 +98,10 @@ class AdminConversationDetailOut(BaseModel):
     messages: list[AdminConversationMessageOut]
     runs: list[AdminConversationRunOut]
     pdf_resources: list[AdminConversationPdfOut]
-    state: dict[str, Any] = Field(default_factory=dict)
+    runtime_link: dict[str, Any] = Field(default_factory=dict)
+    runtime_snapshots: list[AdminConversationRuntimeSnapshotOut] = Field(default_factory=list)
+    long_term_memory_records: list[AdminConversationLongTermMemoryOut] = Field(default_factory=list)
+    short_term_memory: dict[str, Any] = Field(default_factory=dict)
 
 
 class AdminPdfListItemOut(BaseModel):

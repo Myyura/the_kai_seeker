@@ -355,6 +355,31 @@
   color: var(--color-primary);
 }
 
+.selectorButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--card-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  font-weight: 700;
+  transition: var(--transition-fast);
+}
+
+.selectorButton:hover {
+  border-color: rgba(46, 133, 85, 0.35);
+  color: var(--color-primary);
+}
+
+.selectorButtonActive {
+  border-color: rgba(46, 133, 85, 0.45);
+  background: rgba(46, 133, 85, 0.08);
+  color: var(--color-primary);
+}
+
 .messageList,
 .runList {
   display: flex;

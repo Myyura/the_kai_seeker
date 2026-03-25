@@ -1,6 +1,15 @@
 import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -69,7 +78,7 @@ class ChatMessage(Base):
 
 
 class ChatRun(Base):
-    """One assistant run for a user turn, including tool/status events."""
+    """One assistant run for a user turn."""
 
     __tablename__ = "chat_runs"
 
@@ -90,49 +99,40 @@ class ChatRun(Base):
 
     session: Mapped["ChatSession"] = relationship(back_populates="runs")
     assistant_message: Mapped["ChatMessage | None"] = relationship(back_populates="run")
-    events: Mapped[list["ChatRunEvent"]] = relationship(
-        back_populates="run", cascade="all, delete-orphan", order_by="ChatRunEvent.sequence"
-    )
-    debug_payload: Mapped["ChatRunDebugPayload | None"] = relationship(
+    tool_calls: Mapped[list["ChatToolCall"]] = relationship(
         back_populates="run",
         cascade="all, delete-orphan",
-        uselist=False,
+        order_by="ChatToolCall.sequence",
+    )
+    runtime_snapshots: Mapped[list["AgentRuntimeSnapshotRecord"]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+        order_by="AgentRuntimeSnapshotRecord.id",
     )
 
 
-class ChatRunEvent(Base):
-    """Persisted run event payloads for tool/status history."""
+class ChatToolCall(Base):
+    """A persisted tool call executed during a run."""
 
-    __tablename__ = "chat_run_events"
-    __table_args__ = (UniqueConstraint("run_id", "sequence", name="uq_run_event_sequence"),)
+    __tablename__ = "chat_tool_calls"
+    __table_args__ = (UniqueConstraint("run_id", "sequence", name="uq_tool_call_sequence"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     run_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("chat_runs.id", ondelete="CASCADE"), nullable=False
     )
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
-    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    payload: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-
-    run: Mapped["ChatRun"] = relationship(back_populates="events")
-
-
-class ChatRunDebugPayload(Base):
-    """Persisted run-level debug payload for AgentRuntime inspection."""
-
-    __tablename__ = "chat_run_debug_payloads"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    run_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("chat_runs.id", ondelete="CASCADE"),
-        nullable=False,
-        unique=True,
-    )
-    payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    call_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    provider_item_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    tool_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    activity_label: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    arguments_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    output_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="completed")
+    error_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -140,7 +140,43 @@ class ChatRunDebugPayload(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    run: Mapped["ChatRun"] = relationship(back_populates="debug_payload")
+    run: Mapped["ChatRun"] = relationship(back_populates="tool_calls")
+    artifacts: Mapped[list["ChatToolArtifact"]] = relationship(
+        back_populates="tool_call",
+        cascade="all, delete-orphan",
+        order_by="ChatToolArtifact.id",
+    )
+
+
+class ChatToolArtifact(Base):
+    """A persisted artifact produced by a tool call."""
+
+    __tablename__ = "chat_tool_artifacts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    tool_call_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("chat_tool_calls.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    summary_format: Mapped[str] = mapped_column(String(16), nullable=False, default="text")
+    body_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    body_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    locator_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    replay_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    search_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    tool_call: Mapped["ChatToolCall"] = relationship(back_populates="artifacts")
 
 
 class ChatSessionPdfResource(Base):

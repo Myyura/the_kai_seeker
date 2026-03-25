@@ -111,11 +111,14 @@ class PdfService:
         snippets = [
             {"page": page, "text": text[:700]} for _, page, text in selected
         ]
+        match_count = len(snippets)
 
         return {
             "pdf_id": pdf_id,
             "question": question,
             "snippets": snippets,
+            "match_count": match_count,
+            "no_match": match_count == 0,
         }
 
     async def list_admin_documents(

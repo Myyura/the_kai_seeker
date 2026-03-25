@@ -23,7 +23,7 @@ MAX_NOTES = 20
 class ShortTermMemoryService:
     def default_state(self) -> dict[str, Any]:
         return {
-            "version": 1,
+            "version": 2,
             "goal": {
                 "core_user_need": "",
                 "current_focus": "",
@@ -33,7 +33,7 @@ class ShortTermMemoryService:
                 "completed_work": [],
                 "pending_actions": [],
                 "open_questions": [],
-                "last_assistant_summary": "",
+                "last_turn_summary": "",
                 "recent_turns": [],
             },
             "artifacts": {
@@ -63,6 +63,7 @@ class ShortTermMemoryService:
             data = payload
 
         self._merge_defaults(state, data)
+        self._normalize_legacy_turn_summary_fields(state)
         return state
 
     def dump(self, state: dict[str, Any]) -> str:
@@ -107,6 +108,7 @@ class ShortTermMemoryService:
                 assistant_message=assistant_message.content
                 if assistant_message is not None
                 else "",
+                turn_summary=self.extract_turn_summary_from_run(run),
                 tool_entries=tool_entries,
                 status=getattr(run, "status", "completed"),
             )
@@ -145,6 +147,7 @@ class ShortTermMemoryService:
         *,
         user_request: str,
         assistant_message: str,
+        turn_summary: str | None,
         tool_entries: list[dict[str, Any]],
         status: str,
     ) -> dict[str, Any]:
@@ -187,15 +190,22 @@ class ShortTermMemoryService:
                 item for item in progress["pending_actions"] if item != cleaned_user_request
             ]
 
-        if assistant_message.strip():
-            progress["last_assistant_summary"] = self._preview(assistant_message, limit=320)
+        effective_turn_summary = self._preview(
+            turn_summary.strip() if isinstance(turn_summary, str) else assistant_message,
+            limit=320,
+        )
+        if effective_turn_summary:
+            progress["last_turn_summary"] = effective_turn_summary
 
-        if cleaned_user_request or tools_used or assistant_message.strip():
+        if cleaned_user_request or tools_used or assistant_message.strip() or effective_turn_summary:
             turn = {
                 "user_request": cleaned_user_request,
                 "status": status,
                 "tools_used": self._dedupe_keep_order(tools_used),
-                "assistant_summary": self._preview(assistant_message, limit=240),
+                "turn_summary": self._preview(
+                    turn_summary.strip() if isinstance(turn_summary, str) and turn_summary.strip() else assistant_message,
+                    limit=240,
+                ),
                 "errors": errors,
             }
             progress["recent_turns"].append(turn)
@@ -226,7 +236,7 @@ class ShortTermMemoryService:
                 "user_request": user_request.strip(),
                 "status": "failed",
                 "tools_used": [],
-                "assistant_summary": "",
+                "turn_summary": "",
                 "errors": [message] if message else [],
             }
         )
@@ -322,34 +332,168 @@ class ShortTermMemoryService:
         return "\n\n".join(section for section in sections if section)
 
     def extract_tool_entries_from_run(self, run: Any) -> list[dict[str, Any]]:
-        entries: list[dict[str, Any]] = []
-        for event in getattr(run, "events", []):
-            payload = self._parse_payload(getattr(event, "payload", None))
-            if payload.get("type") != "tool.finished":
-                continue
-            tool_name = payload.get("tool_name")
-            if not tool_name:
-                continue
-            entries.append(
-                {
-                    "tool": tool_name,
-                    "args": payload.get("args", {})
-                    if isinstance(payload.get("args"), dict)
-                    else {},
-                    "result": payload.get("tool_result")
-                    or payload.get("tool_result_preview")
-                    or payload.get("error_message", ""),
-                    "success": bool(payload.get("success", True)),
-                    "error_message": payload.get("error_message"),
-                }
-            )
-        return entries
+        return [self._serialize_tool_call(tool_call) for tool_call in getattr(run, "tool_calls", [])]
+
+    def extract_turn_summary_from_run(self, run: Any) -> str:
+        snapshots = getattr(run, "runtime_snapshots", []) or []
+        if not snapshots:
+            return ""
+        payload = self._parse_payload(getattr(snapshots[-1], "snapshot_payload", None))
+        if not isinstance(payload, dict):
+            return ""
+        turn_summary = payload.get("turn_summary") or payload.get("summary")
+        return turn_summary.strip() if isinstance(turn_summary, str) else ""
 
     def _apply_tool_memory(self, state: dict[str, Any], entry: dict[str, Any]) -> None:
-        tool = entry.get("tool")
+        tool = entry.get("tool_name") or entry.get("tool")
         raw_result = entry.get("result", "")
-        args = entry.get("args", {}) if isinstance(entry.get("args"), dict) else {}
+        args = entry.get("arguments") if isinstance(entry.get("arguments"), dict) else entry.get("args", {})
+        args = args if isinstance(args, dict) else {}
+        artifacts_payload = entry.get("artifacts") if isinstance(entry.get("artifacts"), list) else []
         artifacts = state["artifacts"]
+
+        if artifacts_payload:
+            if tool == "lookup_source":
+                for artifact in artifacts_payload:
+                    for source in self._artifact_body_list(artifact):
+                        if not isinstance(source, dict):
+                            continue
+                        normalized = {
+                            "id": source.get("id", ""),
+                            "name": source.get("name", ""),
+                            "category": source.get("category", ""),
+                            "school_id": source.get("school_id"),
+                            "urls": source.get("urls", {})
+                            if isinstance(source.get("urls"), dict)
+                            else {},
+                        }
+                        self._upsert_dict(
+                            artifacts["sources"],
+                            normalized,
+                            identity=normalized.get("id") or normalized.get("name"),
+                            limit=MAX_SOURCES,
+                        )
+                return
+
+            if tool == "web_fetch":
+                for artifact in artifacts_payload:
+                    locator = artifact.get("locator", {}) if isinstance(artifact, dict) else {}
+                    if not isinstance(locator, dict):
+                        locator = {}
+                    page = {
+                        "url": locator.get("url") or args.get("url") or "",
+                        "summary": artifact.get("summary", ""),
+                        "links": self._normalize_url_list(locator.get("links")),
+                        "pdf_links": self._normalize_url_list(locator.get("pdf_links")),
+                    }
+                    self._upsert_dict(
+                        artifacts["visited_pages"],
+                        page,
+                        identity=page["url"] or self._preview(page["summary"], limit=120),
+                        limit=MAX_VISITED_PAGES,
+                    )
+                return
+
+            if tool in {"fetch_pdf_and_upload", "process_and_summarize_pdf"}:
+                for artifact in artifacts_payload:
+                    locator = artifact.get("locator", {}) if isinstance(artifact, dict) else {}
+                    if not isinstance(locator, dict):
+                        locator = {}
+                    pdf = {
+                        "pdf_id": locator.get("pdf_id"),
+                        "filename": locator.get("filename"),
+                        "source_url": locator.get("source_url"),
+                        "summary": artifact.get("summary", ""),
+                    }
+                    self._upsert_dict(
+                        artifacts["pdfs"],
+                        pdf,
+                        identity=str(pdf.get("pdf_id", "")),
+                        limit=MAX_PDFS,
+                    )
+                return
+
+            if tool == "query_pdf_details":
+                for artifact in artifacts_payload:
+                    locator = artifact.get("locator", {}) if isinstance(artifact, dict) else {}
+                    body_json = artifact.get("body_json") if isinstance(artifact, dict) else None
+                    if not isinstance(locator, dict):
+                        locator = {}
+                    item = {
+                        "pdf_id": locator.get("pdf_id"),
+                        "question": locator.get("question") or args.get("question"),
+                        "pages": locator.get("pages") if isinstance(locator.get("pages"), list) else [],
+                        "summary": artifact.get("summary", ""),
+                        "snippets": body_json.get("snippets", [])
+                        if isinstance(body_json, dict)
+                        else [],
+                    }
+                    self._upsert_dict(
+                        artifacts["pdf_queries"],
+                        item,
+                        identity=f"{item.get('pdf_id')}::{item.get('question')}",
+                        limit=MAX_PDF_QUERIES,
+                    )
+                return
+
+            if tool == "search_schools":
+                for artifact in artifacts_payload:
+                    results = self._artifact_body_list(artifact)
+                    item = {
+                        "query": args.get("query"),
+                        "results": [
+                            self._compact_school_result(row)
+                            for row in results[:6]
+                            if isinstance(row, dict)
+                        ],
+                    }
+                    self._upsert_dict(
+                        artifacts["school_searches"],
+                        item,
+                        identity=args.get("query") or "__all__",
+                        limit=MAX_SCHOOL_SEARCHES,
+                    )
+                return
+
+            if tool == "search_questions":
+                for artifact in artifacts_payload:
+                    results = self._artifact_body_list(artifact)
+                    item = {
+                        "filters": {k: v for k, v in args.items() if v not in (None, "", [])},
+                        "results": [
+                            self._compact_question_result(row)
+                            for row in results[:8]
+                            if isinstance(row, dict)
+                        ],
+                    }
+                    identity = json.dumps(item["filters"], sort_keys=True, ensure_ascii=False)
+                    self._upsert_dict(
+                        artifacts["question_searches"],
+                        item,
+                        identity=identity or "__all__",
+                        limit=MAX_QUESTION_SEARCHES,
+                    )
+                return
+
+            if tool == "fetch_question":
+                for artifact in artifacts_payload:
+                    locator = artifact.get("locator", {}) if isinstance(artifact, dict) else {}
+                    if not isinstance(locator, dict):
+                        locator = {}
+                    item = {
+                        "question_id": locator.get("question_id") or args.get("question_id"),
+                        "summary": artifact.get("summary", ""),
+                        "source": locator.get("source"),
+                        "school": locator.get("school"),
+                    }
+                    if item["question_id"]:
+                        self._upsert_dict(
+                            artifacts["fetched_questions"],
+                            item,
+                            identity=item["question_id"],
+                            limit=MAX_FETCHED_QUESTIONS,
+                        )
+                return
 
         if tool == "lookup_source":
             parsed = self._parse_json(raw_result)
@@ -466,9 +610,11 @@ class ShortTermMemoryService:
         self._append_unique_text(artifacts["notes"], note, limit=MAX_NOTES)
 
     def _build_completed_work_items(self, entry: dict[str, Any]) -> list[str]:
-        tool = entry.get("tool")
-        args = entry.get("args", {}) if isinstance(entry.get("args"), dict) else {}
+        tool = entry.get("tool_name") or entry.get("tool")
+        args = entry.get("arguments") if isinstance(entry.get("arguments"), dict) else entry.get("args", {})
+        args = args if isinstance(args, dict) else {}
         raw_result = entry.get("result", "")
+        artifacts_payload = entry.get("artifacts") if isinstance(entry.get("artifacts"), list) else []
         if entry.get("success") is False:
             return []
 
@@ -477,6 +623,14 @@ class ShortTermMemoryService:
             return [f"Looked up official sources{f' for {target}' if target else ''}."]
 
         if tool == "web_fetch":
+            if artifacts_payload:
+                url = ""
+                for artifact in artifacts_payload:
+                    locator = artifact.get("locator", {}) if isinstance(artifact, dict) else {}
+                    if isinstance(locator, dict) and locator.get("url"):
+                        url = str(locator["url"])
+                        break
+                return [f"Fetched and read web page {url}."] if url else ["Fetched and read a web page."]
             parsed = self._parse_json(raw_result)
             url = parsed.get("url") if isinstance(parsed, dict) else args.get("url")
             return (
@@ -484,6 +638,17 @@ class ShortTermMemoryService:
             )
 
         if tool == "fetch_pdf_and_upload":
+            if artifacts_payload:
+                results = []
+                for artifact in artifacts_payload:
+                    locator = artifact.get("locator", {}) if isinstance(artifact, dict) else {}
+                    label = ""
+                    if isinstance(locator, dict):
+                        label = locator.get("filename") or locator.get("source_url") or ""
+                        if not label and locator.get("pdf_id") is not None:
+                            label = f"pdf_id={locator['pdf_id']}"
+                    results.append(f"Fetched and processed PDF {label or 'artifact'}.")
+                return results or ["Fetched and processed a PDF."]
             items = self._extract_pdf_entries(raw_result)
             results = []
             for item in items:
@@ -494,6 +659,17 @@ class ShortTermMemoryService:
             return results or ["Fetched and processed a PDF."]
 
         if tool == "process_and_summarize_pdf":
+            if artifacts_payload:
+                results = []
+                for artifact in artifacts_payload:
+                    locator = artifact.get("locator", {}) if isinstance(artifact, dict) else {}
+                    label = ""
+                    if isinstance(locator, dict):
+                        label = locator.get("filename") or ""
+                        if not label and locator.get("pdf_id") is not None:
+                            label = f"pdf_id={locator['pdf_id']}"
+                    results.append(f"Summarized PDF {label or 'artifact'}.")
+                return results or ["Summarized a PDF."]
             items = self._extract_pdf_entries(raw_result)
             results = []
             for item in items:
@@ -503,6 +679,12 @@ class ShortTermMemoryService:
 
         if tool == "query_pdf_details":
             question = args.get("question")
+            if not question and artifacts_payload:
+                for artifact in artifacts_payload:
+                    locator = artifact.get("locator", {}) if isinstance(artifact, dict) else {}
+                    if isinstance(locator, dict) and locator.get("question"):
+                        question = locator["question"]
+                        break
             if question:
                 return [f"Queried PDF details for '{question}'."]
             return ["Queried PDF details."]
@@ -517,6 +699,12 @@ class ShortTermMemoryService:
 
         if tool == "fetch_question":
             question_id = args.get("question_id")
+            if not question_id and artifacts_payload:
+                for artifact in artifacts_payload:
+                    locator = artifact.get("locator", {}) if isinstance(artifact, dict) else {}
+                    if isinstance(locator, dict) and locator.get("question_id"):
+                        question_id = locator["question_id"]
+                        break
             return [f"Fetched question {question_id}."] if question_id else ["Fetched a question."]
 
         if tool == "echo":
@@ -682,8 +870,8 @@ class ShortTermMemoryService:
         created_at = getattr(run, "created_at", None)
         return (created_at.isoformat() if created_at is not None else "", getattr(run, "id", 0))
 
-    def _parse_payload(self, payload: Any) -> dict[str, Any]:
-        if isinstance(payload, dict):
+    def _parse_payload(self, payload: Any) -> Any:
+        if isinstance(payload, (dict, list)):
             return payload
         if not isinstance(payload, str) or not payload.strip():
             return {}
@@ -691,7 +879,7 @@ class ShortTermMemoryService:
             parsed = json.loads(payload)
         except json.JSONDecodeError:
             return {}
-        return parsed if isinstance(parsed, dict) else {}
+        return parsed
 
     def _parse_json(self, raw_result: str) -> Any:
         if not isinstance(raw_result, str) or not raw_result.strip():
@@ -713,9 +901,9 @@ class ShortTermMemoryService:
         request = turn.get("user_request") or "(no request text captured)"
         status = turn.get("status") or "unknown"
         tools = ", ".join(turn.get("tools_used", [])) or "none"
-        assistant_summary = turn.get("assistant_summary") or "no assistant summary"
+        turn_summary = turn.get("turn_summary") or turn.get("assistant_summary") or "no turn summary"
         errors = "; ".join(turn.get("errors", []))
-        line = f"[{status}] request={request} | tools={tools} | outcome={assistant_summary}"
+        line = f"[{status}] request={request} | tools={tools} | outcome={turn_summary}"
         if errors:
             line += f" | errors={errors}"
         return line
@@ -814,6 +1002,23 @@ class ShortTermMemoryService:
                 continue
             target[key] = value
 
+    def _normalize_legacy_turn_summary_fields(self, state: dict[str, Any]) -> None:
+        progress = state.get("progress")
+        if not isinstance(progress, dict):
+            return
+
+        if not progress.get("last_turn_summary") and isinstance(progress.get("last_assistant_summary"), str):
+            progress["last_turn_summary"] = progress["last_assistant_summary"]
+
+        recent_turns = progress.get("recent_turns")
+        if not isinstance(recent_turns, list):
+            return
+        for turn in recent_turns:
+            if not isinstance(turn, dict):
+                continue
+            if not turn.get("turn_summary") and isinstance(turn.get("assistant_summary"), str):
+                turn["turn_summary"] = turn["assistant_summary"]
+
     def _preview(self, text: Any, limit: int = 240) -> str:
         if not isinstance(text, str):
             return ""
@@ -834,6 +1039,42 @@ class ShortTermMemoryService:
             if isinstance(value, str) and value:
                 normalized.append(value)
         return self._dedupe_keep_order(normalized)[:10]
+
+    def _serialize_tool_call(self, tool_call: Any) -> dict[str, Any]:
+        return {
+            "tool_name": getattr(tool_call, "tool_name", ""),
+            "tool": getattr(tool_call, "tool_name", ""),
+            "arguments": self._parse_payload(getattr(tool_call, "arguments_json", None)),
+            "args": self._parse_payload(getattr(tool_call, "arguments_json", None)),
+            "output": self._parse_payload(getattr(tool_call, "output_json", None)),
+            "success": getattr(tool_call, "status", "completed") != "failed",
+            "error_text": getattr(tool_call, "error_text", None),
+            "error_message": getattr(tool_call, "error_text", None),
+            "artifacts": [self._serialize_artifact(artifact) for artifact in getattr(tool_call, "artifacts", [])],
+        }
+
+    def _serialize_artifact(self, artifact: Any) -> dict[str, Any]:
+        body_json = self._parse_payload(getattr(artifact, "body_json", None))
+        locator = self._parse_payload(getattr(artifact, "locator_json", None))
+        replay = self._parse_payload(getattr(artifact, "replay_json", None))
+        return {
+            "id": getattr(artifact, "id", None),
+            "kind": getattr(artifact, "kind", ""),
+            "label": getattr(artifact, "label", None),
+            "summary": getattr(artifact, "summary", ""),
+            "summary_format": getattr(artifact, "summary_format", "text"),
+            "body_text": getattr(artifact, "body_text", None),
+            "body_json": body_json if body_json else None,
+            "locator": locator,
+            "replay": replay if replay else None,
+            "search_text": getattr(artifact, "search_text", ""),
+            "is_primary": bool(getattr(artifact, "is_primary", True)),
+        }
+
+    @staticmethod
+    def _artifact_body_list(artifact: dict[str, Any]) -> list[Any]:
+        body_json = artifact.get("body_json")
+        return body_json if isinstance(body_json, list) else []
 
     def _dedupe_keep_order(self, values: list[str]) -> list[str]:
         seen: set[str] = set()

@@ -9,11 +9,11 @@ from sqlalchemy.orm import selectinload
 from app.models.conversation import (
     ChatMessage,
     ChatRun,
-    ChatRunDebugPayload,
-    ChatRunEvent,
     ChatSession,
     ChatSessionPdfResource,
     ChatSessionShortTermMemory,
+    ChatToolArtifact,
+    ChatToolCall,
 )
 from app.models.pdf_document import PdfDocument
 
@@ -124,8 +124,10 @@ class ConversationRepository:
             .options(
                 selectinload(ChatSession.messages),
                 selectinload(ChatSession.pdf_resources),
-                selectinload(ChatSession.runs).selectinload(ChatRun.events),
-                selectinload(ChatSession.runs).selectinload(ChatRun.debug_payload),
+                selectinload(ChatSession.runs)
+                .selectinload(ChatRun.tool_calls)
+                .selectinload(ChatToolCall.artifacts),
+                selectinload(ChatSession.runs).selectinload(ChatRun.runtime_snapshots),
                 selectinload(ChatSession.short_term_memory),
                 selectinload(ChatSession.runtime_link),
                 selectinload(ChatSession.runtime_snapshots),
@@ -232,74 +234,63 @@ class ConversationRepository:
             await self.session.refresh(run)
         return run
 
-    async def add_run_event(
+    async def save_tool_calls(
         self,
         run_id: int,
-        sequence: int,
-        event_type: str,
-        payload: dict,
+        tool_calls: list[dict[str, Any]],
         *,
         commit: bool = True,
-    ) -> ChatRunEvent:
-        event = ChatRunEvent(
-            run_id=run_id,
-            sequence=sequence,
-            event_type=event_type,
-            payload=json.dumps(payload, ensure_ascii=False),
-        )
-        self.session.add(event)
-        await self.session.flush()
-        if commit:
-            await self.session.commit()
-            await self.session.refresh(event)
-        return event
-
-    async def add_run_events_bulk(
-        self,
-        run_id: int,
-        events: list[dict[str, Any]],
-        *,
-        commit: bool = True,
-    ) -> list[ChatRunEvent]:
-        created = [
-            ChatRunEvent(
+    ) -> list[ChatToolCall]:
+        created_calls: list[ChatToolCall] = []
+        for index, tool_call in enumerate(tool_calls, start=1):
+            row = ChatToolCall(
                 run_id=run_id,
-                sequence=event["sequence"],
-                event_type=event["event_type"],
-                payload=json.dumps(event["payload"], ensure_ascii=False),
+                sequence=index,
+                call_id=str(tool_call["call_id"]),
+                provider_item_id=tool_call.get("provider_item_id"),
+                tool_name=str(tool_call["tool_name"]),
+                display_name=tool_call.get("display_name"),
+                activity_label=tool_call.get("activity_label"),
+                arguments_json=json.dumps(tool_call.get("arguments", {}), ensure_ascii=False),
+                output_json=json.dumps(tool_call.get("output", {}), ensure_ascii=False),
+                status=str(tool_call.get("status", "completed")),
+                error_text=tool_call.get("error_text"),
+                started_at=tool_call.get("started_at"),
+                finished_at=tool_call.get("finished_at"),
             )
-            for event in events
-        ]
-        if not created:
-            return []
+            self.session.add(row)
+            await self.session.flush()
+            created_calls.append(row)
 
-        self.session.add_all(created)
+            artifacts = tool_call.get("artifacts", [])
+            for artifact in artifacts:
+                artifact_row = ChatToolArtifact(
+                    tool_call_id=row.id,
+                    kind=str(artifact["kind"]),
+                    label=artifact.get("label"),
+                    summary=str(artifact.get("summary", "")),
+                    summary_format=str(artifact.get("summary_format", "text")),
+                    body_text=artifact.get("body_text"),
+                    body_json=(
+                        json.dumps(artifact["body_json"], ensure_ascii=False)
+                        if artifact.get("body_json") is not None
+                        else None
+                    ),
+                    locator_json=json.dumps(artifact.get("locator", {}), ensure_ascii=False),
+                    replay_json=(
+                        json.dumps(artifact["replay"], ensure_ascii=False)
+                        if artifact.get("replay") is not None
+                        else None
+                    ),
+                    search_text=str(artifact.get("search_text", "")),
+                    is_primary=bool(artifact.get("is_primary", True)),
+                )
+                self.session.add(artifact_row)
+
         await self.session.flush()
         if commit:
             await self.session.commit()
-        return created
-
-    async def save_run_debug_payload(
-        self,
-        run_id: int,
-        payload: dict[str, Any],
-        *,
-        commit: bool = True,
-    ) -> ChatRunDebugPayload:
-        stmt = select(ChatRunDebugPayload).where(ChatRunDebugPayload.run_id == run_id)
-        existing = (await self.session.execute(stmt)).scalar_one_or_none()
-        payload_text = json.dumps(payload, ensure_ascii=False)
-        if existing is None:
-            existing = ChatRunDebugPayload(run_id=run_id, payload=payload_text)
-            self.session.add(existing)
-        else:
-            existing.payload = payload_text
-
-        await self.session.flush()
-        if commit:
-            await self.session.commit()
-            await self.session.refresh(existing)
-        return existing
+        return created_calls
 
     async def update_run(
         self,

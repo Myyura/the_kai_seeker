@@ -29,6 +29,7 @@ interface RunEventPayload {
   assistant_message_id?: number;
   delta?: string;
   content?: string;
+  turn_summary?: string;
   message?: string;
   resource?: {
     pdf_id?: number;
@@ -39,7 +40,7 @@ interface RunEventPayload {
 }
 
 interface RunEvent {
-  id?: number;
+  id?: number | string;
   eventType?: string;
   createdAt?: string;
   payload: RunEventPayload;
@@ -70,12 +71,27 @@ interface SessionDetail {
     status: string;
     created_at: string;
     updated_at: string;
-    events: {
+    tool_calls: {
       id: number;
       sequence: number;
-      event_type: string;
+      call_id: string;
+      tool_name: string;
+      display_name?: string | null;
+      activity_label?: string | null;
+      arguments: Record<string, unknown>;
+      success: boolean;
+      status: string;
+      error_text?: string | null;
+      started_at?: string | null;
+      finished_at?: string | null;
+      artifacts: {
+        id: number;
+        kind: string;
+        label?: string | null;
+        summary: string;
+        locator: Record<string, unknown>;
+      }[];
       created_at: string;
-      payload: RunEventPayload;
     }[];
   }[];
 }
@@ -109,18 +125,69 @@ function normalizeRunEvent(payload: RunEventPayload): RunEventPayload {
 }
 
 function hydrateRun(detailRun: SessionDetail["runs"][number]): RunRecord {
+  const events: RunEvent[] = [];
+  let sequence = 0;
+
+  for (const toolCall of detailRun.tool_calls) {
+    sequence += 1;
+    events.push({
+      id: `${toolCall.id}-started`,
+      eventType: "tool.started",
+      createdAt: toolCall.started_at || toolCall.created_at,
+      payload: normalizeRunEvent({
+        sequence,
+        type: "tool.started",
+        tool_call_id: toolCall.call_id,
+        tool_name: toolCall.tool_name,
+        tool_display_name: toolCall.display_name || toolCall.tool_name,
+        tool_activity_label: toolCall.activity_label || toolCall.display_name || toolCall.tool_name,
+        args: toolCall.arguments,
+      }),
+    });
+    sequence += 1;
+    const firstPdfArtifact = toolCall.artifacts.find((artifact) => artifact.kind === "pdf_summary");
+    const pdfId =
+      typeof firstPdfArtifact?.locator?.pdf_id === "number" ? firstPdfArtifact.locator.pdf_id : undefined;
+    events.push({
+      id: `${toolCall.id}-finished`,
+      eventType: "tool.finished",
+      createdAt: toolCall.finished_at || toolCall.created_at,
+      payload: normalizeRunEvent({
+        sequence,
+        type: "tool.finished",
+        tool_call_id: toolCall.call_id,
+        tool_name: toolCall.tool_name,
+        tool_display_name: toolCall.display_name || toolCall.tool_name,
+        tool_activity_label: toolCall.activity_label || toolCall.display_name || toolCall.tool_name,
+        args: toolCall.arguments,
+        success: toolCall.success,
+        error_message: toolCall.error_text || undefined,
+        resource:
+          pdfId != null
+            ? {
+                pdf_id: pdfId,
+                filename:
+                  typeof firstPdfArtifact?.locator?.filename === "string"
+                    ? firstPdfArtifact.locator.filename
+                    : null,
+                status: "processed",
+                source_url:
+                  typeof firstPdfArtifact?.locator?.source_url === "string"
+                    ? firstPdfArtifact.locator.source_url
+                    : null,
+              }
+            : undefined,
+      }),
+    });
+  }
+
   return {
     id: detailRun.id,
     assistantMessageId: detailRun.assistant_message_id,
     status: detailRun.status,
     createdAt: detailRun.created_at,
     updatedAt: detailRun.updated_at,
-    events: detailRun.events.map((event) => ({
-      id: event.id,
-      eventType: event.event_type,
-      createdAt: event.created_at,
-      payload: normalizeRunEvent(event.payload),
-    })),
+    events,
   };
 }
 
@@ -204,6 +271,12 @@ function buildSessionTitle(text: string): string {
     return trimmed || "New Chat";
   }
   return `${trimmed.slice(0, MAX_SESSION_TITLE_LENGTH).trim()}…`;
+}
+
+function toSortTimestamp(value?: string): number {
+  if (!value) return Number.POSITIVE_INFINITY;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
 }
 
 function RunCard({ run, live = false }: { run: RunRecord; live?: boolean }) {
@@ -624,6 +697,12 @@ export default function ChatPage() {
       orphanRuns.push(run);
     }
   }
+  const sortedOrphanRuns = [...orphanRuns].sort((left, right) => {
+    const delta = toSortTimestamp(left.createdAt) - toSortTimestamp(right.createdAt);
+    if (delta !== 0) return delta;
+    return String(left.id).localeCompare(String(right.id));
+  });
+  const orphanRunQueue = [...sortedOrphanRuns];
 
   return (
     <div className={styles.container}>
@@ -712,8 +791,23 @@ export default function ChatPage() {
             <div className={styles.messages}>
               {messages.map((message, index) => {
                 const run = message.id ? runsByAssistantMessageId.get(message.id) : undefined;
+                const messageTimestamp = toSortTimestamp(message.createdAt);
+                const runsBeforeMessage: RunRecord[] = [];
+
+                while (
+                  orphanRunQueue.length > 0 &&
+                  toSortTimestamp(orphanRunQueue[0].createdAt) <= messageTimestamp
+                ) {
+                  runsBeforeMessage.push(orphanRunQueue.shift() as RunRecord);
+                }
+
                 return (
                   <Fragment key={message.id || `local-${index}`}>
+                    {runsBeforeMessage.map((orphanRun) => (
+                      <Fragment key={`orphan-run-${orphanRun.id}`}>
+                        <RunCard run={orphanRun} />
+                      </Fragment>
+                    ))}
                     {message.role === "assistant" && run && <RunCard run={run} />}
                     <div
                       className={`${styles.message} ${
@@ -733,7 +827,7 @@ export default function ChatPage() {
                 );
               })}
 
-              {orphanRuns.map((run) => (
+              {orphanRunQueue.map((run) => (
                 <Fragment key={`orphan-run-${run.id}`}>
                   <RunCard run={run} />
                 </Fragment>

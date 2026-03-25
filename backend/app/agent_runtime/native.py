@@ -15,12 +15,12 @@ from app.agent_runtime.types import (
     HostContextState,
     HostContextSyncResult,
     ToolDefinition,
-    ToolRecord,
+    ToolLoopResult,
 )
-from app.config.agent_policy import build_tool_policy
+from app.config.agent_policy import build_response_format_policy, build_tool_policy
 from app.providers.base import BaseLLMProvider, ProviderMessage
 from app.services.domain_config import domain_config
-from app.services.request_context import set_active_pdf_ids
+from app.services.request_context import set_active_artifact_ids, set_active_pdf_ids
 
 
 class NativeAgentRuntime(AgentRuntime):
@@ -33,7 +33,7 @@ class NativeAgentRuntime(AgentRuntime):
         stored_messages: list[Any],
         stored_runs: list[Any],
         initial_short_term_memory_payload: str | dict[str, Any] | None,
-        tool_loop_runner: Callable[..., Awaitable[tuple[str, list[dict[str, Any]]]]] = run_native_agent_loop,
+        tool_loop_runner: Callable[..., Awaitable[ToolLoopResult]] = run_native_agent_loop,
         short_term_memory_service: ShortTermMemoryService | None = None,
         tool_bridge: ToolBridge | None = None,
     ) -> None:
@@ -125,22 +125,35 @@ class NativeAgentRuntime(AgentRuntime):
 
         allowed_tool_names = self._resolve_allowed_tool_names()
         try:
-            with set_active_pdf_ids(self._collect_active_pdf_ids(turn_input)):
-                assistant_text, tool_call_log = await self.tool_loop_runner(
+            with set_active_pdf_ids(self._collect_active_pdf_ids(turn_input)), set_active_artifact_ids(
+                self._collect_active_artifact_ids()
+            ):
+                loop_result = await self.tool_loop_runner(
                     self.provider,
                     messages,
                     allowed_tool_names=allowed_tool_names,
                     on_event=emit,
                 )
         except Exception as exc:
-            self.short_term_memory_service.record_failure(
-                self.short_term_memory,
-                user_request=current_user_text,
-                error_message=str(exc),
-            )
+            partial_tool_calls = self._extract_partial_tool_calls(exc)
+            if partial_tool_calls:
+                self.short_term_memory_service.record_turn_outcome(
+                    self.short_term_memory,
+                    user_request=current_user_text,
+                    assistant_message="",
+                    turn_summary=None,
+                    tool_entries=partial_tool_calls,
+                    status="failed",
+                )
+            else:
+                self.short_term_memory_service.record_failure(
+                    self.short_term_memory,
+                    user_request=current_user_text,
+                    error_message=str(exc),
+                )
             self.last_snapshot = self._build_snapshot(
                 link=link,
-                summary="Run failed",
+                turn_summary="Run failed",
                 opaque_state={
                     "status": "failed",
                     "context_version": self.host_context_state.context_version,
@@ -148,28 +161,30 @@ class NativeAgentRuntime(AgentRuntime):
             )
             raise
 
+        tool_call_log = [record.model_dump(mode="json") for record in loop_result.tool_calls]
         self.short_term_memory_service.record_turn_outcome(
             self.short_term_memory,
             user_request=current_user_text,
-            assistant_message=assistant_text,
+            assistant_message=loop_result.assistant_text,
+            turn_summary=loop_result.turn_summary,
             tool_entries=tool_call_log,
             status="completed",
         )
         self.last_snapshot = self._build_snapshot(
             link=link,
-            summary=self._preview(assistant_text, limit=320),
+            turn_summary=loop_result.turn_summary,
             opaque_state={
                 "status": "completed",
                 "context_version": self.host_context_state.context_version,
             },
         )
         return AgentTurnOutput(
-            assistant_text=assistant_text,
+            assistant_text=loop_result.assistant_text,
+            turn_summary=loop_result.turn_summary,
             events=[],
-            usage=None,
-            tool_records=[ToolRecord.model_validate(item) for item in tool_call_log],
+            usage=loop_result.usage,
+            tool_calls=loop_result.tool_calls,
             snapshot=self.last_snapshot,
-            artifacts={},
             status="completed",
         )
 
@@ -204,12 +219,13 @@ class NativeAgentRuntime(AgentRuntime):
 
         messages = [
             ProviderMessage(role="system", content=base_system_prompt),
+            ProviderMessage(role="system", content=build_response_format_policy()),
             ProviderMessage(role="system", content=self._render_runtime_context(turn_input)),
+            ProviderMessage(role="system", content=self._build_artifact_context(current_user_text)),
         ]
         messages.extend(
             ProviderMessage(role=message.role, content=message.content) for message in recent_messages
         )
-        messages.append(ProviderMessage(role="assistant", content=self._build_tool_results_context()))
         messages.append(ProviderMessage(role="user", content=current_user_text))
         return messages
 
@@ -324,35 +340,68 @@ class NativeAgentRuntime(AgentRuntime):
             allowed.update(skill.allowed_tools)
         return allowed
 
-    def _build_tool_results_context(self) -> str:
-        entries: list[dict[str, Any]] = []
-        for run in sorted(
-            self.stored_runs,
-            key=lambda item: (
-                item.created_at.isoformat() if getattr(item, "created_at", None) else "",
-                getattr(item, "id", 0),
-            ),
-        ):
-            entries.extend(self.short_term_memory_service.extract_tool_entries_from_run(run))
+    def _build_artifact_context(self, current_user_text: str) -> str:
+        candidates: list[tuple[float, dict[str, Any]]] = []
+        query_tokens = self._tokenize(current_user_text)
 
+        for run in self.stored_runs:
+            run_id = getattr(run, "id", 0)
+            for tool_call in getattr(run, "tool_calls", []):
+                for artifact in getattr(tool_call, "artifacts", []):
+                    locator = self._parse_json(getattr(artifact, "locator_json", None))
+                    replay = self._parse_json(getattr(artifact, "replay_json", None))
+                    text = " ".join(
+                        part
+                        for part in [
+                            getattr(artifact, "label", "") or "",
+                            getattr(artifact, "summary", "") or "",
+                            getattr(artifact, "search_text", "") or "",
+                        ]
+                        if part
+                    )
+                    score = self._artifact_score(
+                        query_tokens=query_tokens,
+                        candidate_text=text,
+                        run_id=run_id,
+                    )
+                    candidates.append(
+                        (
+                            score,
+                            {
+                                "artifact_id": getattr(artifact, "id", None),
+                                "kind": getattr(artifact, "kind", ""),
+                                "label": getattr(artifact, "label", None),
+                                "summary": getattr(artifact, "summary", ""),
+                                "locator": locator,
+                                "replay": replay,
+                            },
+                        )
+                    )
+
+        ranked = [item for _, item in sorted(candidates, key=lambda item: item[0], reverse=True)[:5]]
         lines = [
-            "## Session Tool Results",
-            (
-                "These are complete results from prior tool executions in the current session. "
-                "Reuse them when they already contain the needed URL, content, or identifiers."
-            ),
+            "## Relevant Tool Artifacts",
+            "Use these summaries before re-running tools. If the summary is insufficient, use read_artifact or the replay tool call.",
         ]
-        if not entries:
-            lines.append("No previous tool results are recorded for this session.")
+        if not ranked:
+            lines.append("- No prior tool artifacts are available in this session.")
             return "\n\n".join(lines)
 
-        for index, entry in enumerate(entries, start=1):
-            lines.append(f"### Tool Result {index}: {entry.get('tool')}")
-            lines.append(f"Args: {json.dumps(entry.get('args', {}), ensure_ascii=False)}")
-            lines.append(f"Success: {entry.get('success', True)}")
-            lines.append("Result:")
-            lines.append(entry.get("result") or "(empty)")
-        return "\n\n".join(lines)
+        for artifact in ranked:
+            prefix = f"[artifact:{artifact['artifact_id']}]" if artifact.get("artifact_id") else "[artifact]"
+            label = artifact.get("label") or artifact.get("kind") or "artifact"
+            lines.append(f"- {prefix} {label}")
+            if artifact.get("summary"):
+                lines.append(f"  summary={artifact['summary']}")
+            if artifact.get("locator"):
+                lines.append(
+                    f"  locator={json.dumps(artifact['locator'], ensure_ascii=False, sort_keys=True)}"
+                )
+            if artifact.get("replay"):
+                lines.append(
+                    f"  replay={json.dumps(artifact['replay'], ensure_ascii=False, sort_keys=True)}"
+                )
+        return "\n".join(lines)
 
     def _collect_active_pdf_ids(self, turn_input: AgentTurnInput) -> list[int]:
         handles = self.host_context_state.session_resource_handles if self.host_context_state else []
@@ -367,20 +416,43 @@ class NativeAgentRuntime(AgentRuntime):
                 continue
         return pdf_ids
 
+    def _collect_active_artifact_ids(self) -> list[int]:
+        artifact_ids: list[int] = []
+        for run in self.stored_runs:
+            for tool_call in getattr(run, "tool_calls", []):
+                for artifact in getattr(tool_call, "artifacts", []):
+                    artifact_id = getattr(artifact, "id", None)
+                    if isinstance(artifact_id, int):
+                        artifact_ids.append(artifact_id)
+        return artifact_ids
+
     def _build_snapshot(
         self,
         *,
         link: AgentRuntimeLink,
-        summary: str | None,
+        turn_summary: str | None,
         opaque_state: dict[str, Any],
     ) -> AgentRuntimeSnapshot:
         return AgentRuntimeSnapshot(
             runtime_name=link.runtime_name,
             runtime_session_id=link.runtime_session_id,
             short_term_memory=self.short_term_memory,
-            summary=summary,
+            turn_summary=turn_summary,
             opaque_state=opaque_state,
         )
+
+    @staticmethod
+    def _extract_partial_tool_calls(exc: Exception) -> list[dict[str, Any]]:
+        partial = getattr(exc, "tool_calls", None)
+        if not isinstance(partial, list):
+            return []
+        serialized: list[dict[str, Any]] = []
+        for item in partial:
+            if hasattr(item, "model_dump"):
+                serialized.append(item.model_dump(mode="json"))
+            elif isinstance(item, dict):
+                serialized.append(item)
+        return serialized
 
     @staticmethod
     def _dedupe_resource_handles(handles: list[Any]) -> list[Any]:
@@ -396,3 +468,31 @@ class NativeAgentRuntime(AgentRuntime):
         if len(cleaned) <= limit:
             return cleaned
         return cleaned[: limit - 1] + "…"
+
+    @staticmethod
+    def _parse_json(raw: str | None) -> dict[str, Any]:
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    @staticmethod
+    def _tokenize(text: str) -> set[str]:
+        return {token for token in "".join(ch if ch.isalnum() else " " for ch in text.lower()).split() if token}
+
+    def _artifact_score(
+        self,
+        *,
+        query_tokens: set[str],
+        candidate_text: str,
+        run_id: int,
+    ) -> float:
+        if not candidate_text.strip():
+            return 0.0
+        candidate_tokens = self._tokenize(candidate_text)
+        overlap = len(query_tokens & candidate_tokens)
+        recency_bonus = run_id / 10000.0 if run_id > 0 else 0.0
+        return overlap + recency_bonus

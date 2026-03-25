@@ -1,10 +1,12 @@
+import json
+
 import pytest
 
 from app.agent_runtime.native import NativeAgentRuntime
-from app.providers.base import BaseLLMProvider, ChatResponse, ProviderMessage
 from app.agent_runtime.native_loop import run_native_agent_loop
 from app.agent_runtime.tool_bridge import ToolBridge
 from app.agent_runtime.types import HostContextState, MemoryPack, SkillDefinition
+from app.providers.base import BaseLLMProvider, ChatResponse, ProviderMessage
 from app.tools.base import BaseTool, ToolResult
 from app.tools.registry import tool_registry
 
@@ -43,6 +45,46 @@ class OtherTool(EchoTool):
     name = "other_tool"
     description = "Another tool."
     display_name = "Other Tool"
+
+
+class FakePdfQueryTool(BaseTool):
+    name = "query_pdf_details"
+    description = "Query a processed PDF."
+    display_name = "Query PDF"
+    activity_label = "Searching PDF details"
+
+    class Args:  # type: ignore[no-redef]
+        @staticmethod
+        def model_validate(kwargs):  # type: ignore[no-untyped-def]
+            class _Args:
+                question = kwargs.get("question", "")
+                pdf_id = kwargs.get("pdf_id")
+                top_k = kwargs.get("top_k", 4)
+
+            return _Args()
+
+        @staticmethod
+        def model_json_schema() -> dict:
+            return {
+                "properties": {
+                    "question": {"type": "string", "description": "PDF question"},
+                    "pdf_id": {"type": "integer"},
+                    "top_k": {"type": "integer"},
+                },
+                "required": ["question"],
+            }
+
+    async def execute(self, args) -> ToolResult:  # type: ignore[no-untyped-def]
+        return ToolResult(
+            success=True,
+            data={
+                "pdf_id": args.pdf_id or 15,
+                "question": args.question,
+                "snippets": [],
+                "match_count": 0,
+                "no_match": True,
+            },
+        )
 
 
 class FakeProvider(BaseLLMProvider):
@@ -109,19 +151,76 @@ async def test_run_agent_loop_rejects_disallowed_tools() -> None:
 
     provider = FakeProvider(
         [
-            '<tool_call>\n{"name": "other_tool", "arguments": {"message": "hi"}}\n</tool_call>',
-            "final answer",
+            json.dumps(
+                {
+                    "response_type": "tool_call",
+                    "assistant_text": "",
+                    "turn_summary": "",
+                    "tool_call": {"name": "other_tool", "arguments": {"message": "hi"}},
+                }
+            ),
+            json.dumps(
+                {
+                    "response_type": "final",
+                    "assistant_text": "final answer",
+                    "turn_summary": "final answer summary",
+                    "tool_call": None,
+                }
+            ),
         ]
     )
 
-    final_answer, tool_call_log = await run_native_agent_loop(
+    result = await run_native_agent_loop(
         provider,
         [ProviderMessage(role="user", content="hello")],
         allowed_tool_names={"echo"},
     )
 
-    assert final_answer == "final answer"
-    assert len(tool_call_log) == 1
-    assert tool_call_log[0]["tool"] == "other_tool"
-    assert tool_call_log[0]["success"] is False
-    assert "not allowed" in tool_call_log[0]["result"]
+    assert result.assistant_text == "final answer"
+    assert result.turn_summary == "final answer summary"
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0].tool_name == "other_tool"
+    assert result.tool_calls[0].success is False
+    assert "not allowed" in (result.tool_calls[0].error_text or "")
+
+
+@pytest.mark.asyncio
+async def test_run_agent_loop_stops_after_repeated_similar_pdf_no_match() -> None:
+    tool_registry.register(FakePdfQueryTool())
+
+    provider = FakeProvider(
+        [
+            json.dumps(
+                {
+                    "response_type": "tool_call",
+                    "assistant_text": "",
+                    "turn_summary": "",
+                    "tool_call": {
+                        "name": "query_pdf_details",
+                        "arguments": {"pdf_id": 15, "question": "有没有特殊材料"},
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "response_type": "tool_call",
+                    "assistant_text": "",
+                    "turn_summary": "",
+                    "tool_call": {
+                        "name": "query_pdf_details",
+                        "arguments": {"pdf_id": 15, "question": "有没有特殊的申请材料或补充材料"},
+                    },
+                }
+            ),
+        ]
+    )
+
+    result = await run_native_agent_loop(
+        provider,
+        [ProviderMessage(role="user", content="帮我查 PDF 里有没有特殊材料")],
+    )
+
+    assert len(result.tool_calls) == 2
+    assert all(record.tool_name == "query_pdf_details" for record in result.tool_calls)
+    assert "没有找到明确匹配的片段" in result.assistant_text
+    assert "未找到" in (result.turn_summary or "")

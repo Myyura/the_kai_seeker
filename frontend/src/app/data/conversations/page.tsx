@@ -27,11 +27,33 @@ interface AdminConversationMessage {
   created_at: string;
 }
 
-interface AdminConversationRunEvent {
+interface AdminConversationToolArtifact {
+  id: number;
+  kind: string;
+  label?: string | null;
+  summary: string;
+  summary_format: string;
+  locator: Record<string, unknown>;
+  replay?: Record<string, unknown> | null;
+  is_primary: boolean;
+  created_at: string;
+}
+
+interface AdminConversationToolCall {
   id: number;
   sequence: number;
-  event_type: string;
-  payload: Record<string, unknown>;
+  call_id: string;
+  tool_name: string;
+  display_name?: string | null;
+  activity_label?: string | null;
+  arguments: Record<string, unknown>;
+  output: Record<string, unknown>;
+  success: boolean;
+  status: string;
+  error_text?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  artifacts: AdminConversationToolArtifact[];
   created_at: string;
 }
 
@@ -39,12 +61,12 @@ interface AdminConversationRun {
   id: number;
   assistant_message_id?: number | null;
   status: string;
-  event_count: number;
-  latest_event_type?: string | null;
+  tool_call_count: number;
+  artifact_count: number;
   created_at: string;
   updated_at: string;
-  events: AdminConversationRunEvent[];
-  debug_payload: Record<string, unknown>;
+  tool_calls: AdminConversationToolCall[];
+  snapshot: Record<string, unknown>;
 }
 
 interface AdminConversationPdf {
@@ -204,6 +226,7 @@ function summarizeRecordMeta(record: Record<string, unknown>): string {
 
 function summarizeRecordBody(record: Record<string, unknown>): string {
   const bodyKeys = [
+    "turn_summary",
     "summary",
     "assistant_summary",
     "value",
@@ -221,28 +244,17 @@ function summarizeRecordBody(record: Record<string, unknown>): string {
   return previewText(stringifyJson(record), 320);
 }
 
-function eventLabel(event: AdminConversationRunEvent): string {
-  const toolDisplayName = asString(event.payload.tool_display_name);
-  const toolName = asString(event.payload.tool_name);
-  if (toolDisplayName) return `${event.event_type} · ${toolDisplayName}`;
-  if (toolName) return `${event.event_type} · ${toolName}`;
-  return event.event_type;
+function toolCallLabel(toolCall: AdminConversationToolCall): string {
+  return toolCall.display_name || toolCall.tool_name;
 }
 
-function eventSummary(event: AdminConversationRunEvent): string {
-  const summaryKeys = [
-    "detail",
-    "message",
-    "tool_result_preview",
-    "content",
-    "delta",
-    "error_message",
-  ];
-  for (const key of summaryKeys) {
-    const value = asString(event.payload[key]);
-    if (value) return previewText(value);
-  }
-  return "";
+function toolCallSummary(toolCall: AdminConversationToolCall): string {
+  const artifactSummary = toolCall.artifacts
+    .map((artifact) => artifact.summary)
+    .find((summary) => typeof summary === "string" && summary.trim().length > 0);
+  if (artifactSummary) return previewText(artifactSummary);
+  if (toolCall.error_text) return previewText(toolCall.error_text);
+  return previewText(stringifyJson(toolCall.output), 320);
 }
 
 function sessionRunLabel(index: number): string {
@@ -305,28 +317,34 @@ export default function DataConversationsPage() {
     return detail.runs.findIndex((run) => run.id === selectedRun.id);
   }, [detail, selectedRun]);
 
-  const selectedDebugPayload = isRecord(selectedRun?.debug_payload) ? selectedRun.debug_payload : {};
-  const selectedHostContextState = isRecord(selectedDebugPayload.host_context_state)
-    ? selectedDebugPayload.host_context_state
+  const selectedSnapshot = isRecord(selectedRun?.snapshot) ? selectedRun.snapshot : {};
+  const selectedHostContextState = isRecord(selectedSnapshot.host_context_state)
+    ? selectedSnapshot.host_context_state
     : {};
-  const selectedTurnInput = isRecord(selectedDebugPayload.turn_input)
-    ? selectedDebugPayload.turn_input
+  const selectedTurnInput = isRecord(selectedSnapshot.turn_input)
+    ? selectedSnapshot.turn_input
     : {};
-  const selectedContextSync = isRecord(selectedDebugPayload.context_sync)
-    ? selectedDebugPayload.context_sync
+  const selectedContextSync = isRecord(selectedSnapshot.context_sync)
+    ? selectedSnapshot.context_sync
     : {};
-  const selectedRuntimeSnapshot = isRecord(selectedDebugPayload.runtime_snapshot)
-    ? selectedDebugPayload.runtime_snapshot
+  const selectedOpaqueState = isRecord(selectedSnapshot.opaque_state)
+    ? selectedSnapshot.opaque_state
     : {};
-  const selectedProvider = isRecord(selectedDebugPayload.provider) ? selectedDebugPayload.provider : {};
-  const selectedRuntimeLink = isRecord(selectedDebugPayload.runtime_link)
-    ? selectedDebugPayload.runtime_link
+  const selectedRuntimeSnapshot = isRecord(selectedSnapshot.opaque_state)
+    ? {
+        turn_summary: selectedSnapshot.turn_summary ?? selectedSnapshot.summary,
+        short_term_memory: selectedSnapshot.short_term_memory,
+        opaque_state: selectedOpaqueState,
+        captured_at: selectedSnapshot.captured_at,
+      }
     : {};
-  const selectedError = isRecord(selectedDebugPayload.error) ? selectedDebugPayload.error : {};
-  const selectedArtifacts = isRecord(selectedDebugPayload.artifacts)
-    ? selectedDebugPayload.artifacts
+  const selectedProvider = isRecord(selectedSnapshot.provider) ? selectedSnapshot.provider : {};
+  const selectedRuntimeLink = isRecord(selectedSnapshot.runtime_link)
+    ? selectedSnapshot.runtime_link
     : {};
-  const selectedUsage = isRecord(selectedDebugPayload.usage) ? selectedDebugPayload.usage : {};
+  const selectedError = isRecord(selectedSnapshot.error) ? selectedSnapshot.error : {};
+  const selectedArtifacts = selectedRun?.tool_calls.flatMap((toolCall) => toolCall.artifacts) ?? [];
+  const selectedUsage = isRecord(selectedSnapshot.usage) ? selectedSnapshot.usage : {};
 
   const memoryPack = isRecord(selectedHostContextState.memory_pack)
     ? selectedHostContextState.memory_pack
@@ -335,8 +353,8 @@ export default function DataConversationsPage() {
   const transientResourceHandles = asRecordList(selectedTurnInput.transient_resource_handles);
   const activeSkills = asRecordList(selectedHostContextState.skill_definitions);
   const availableTools = asRecordList(selectedHostContextState.tool_definitions);
-  const toolRecords = asRecordList(selectedDebugPayload.tool_records);
-  const longTermMemoryWrites = asRecordList(selectedDebugPayload.long_term_memory_writes);
+  const toolRecords = asRecordList(selectedSnapshot.tool_calls);
+  const longTermMemoryWrites = asRecordList(selectedSnapshot.long_term_memory_writes);
 
   const shortTermMemoryGoal: Record<string, unknown> = isRecord(detail?.short_term_memory?.goal)
     ? detail.short_term_memory.goal
@@ -521,7 +539,7 @@ export default function DataConversationsPage() {
     const latestRun = detail.runs[detail.runs.length - 1] ?? null;
     const runtimeLink = isRecord(detail.runtime_link) ? detail.runtime_link : {};
     const latestSnapshot = detail.runtime_snapshots[detail.runtime_snapshots.length - 1] ?? null;
-    const latestRunPayload = isRecord(latestRun?.debug_payload) ? latestRun.debug_payload : {};
+    const latestRunPayload = isRecord(latestRun?.snapshot) ? latestRun.snapshot : {};
     const latestHostContext = isRecord(latestRunPayload.host_context_state)
       ? latestRunPayload.host_context_state
       : {};
@@ -664,12 +682,12 @@ export default function DataConversationsPage() {
                 <div className={styles.summaryValue}>{selectedRun.status}</div>
               </div>
               <div className={styles.summaryCard}>
-                <div className={styles.summaryLabel}>Events</div>
-                <div className={styles.summaryValue}>{selectedRun.event_count}</div>
+                <div className={styles.summaryLabel}>Tool Calls</div>
+                <div className={styles.summaryValue}>{selectedRun.tool_call_count}</div>
               </div>
               <div className={styles.summaryCard}>
-                <div className={styles.summaryLabel}>Tool Records</div>
-                <div className={styles.summaryValue}>{toolRecords.length}</div>
+                <div className={styles.summaryLabel}>Artifacts</div>
+                <div className={styles.summaryValue}>{selectedRun.artifact_count}</div>
               </div>
               <div className={styles.summaryCard}>
                 <div className={styles.summaryLabel}>Memory Writes</div>
@@ -727,7 +745,7 @@ export default function DataConversationsPage() {
                   </div>
                   <div className={styles.detailMetaRow}>
                     <span className={styles.detailMetaLabel}>Payload Version:</span>{" "}
-                    {asNumber(selectedDebugPayload.version) ?? "Not recorded"}
+                    {asNumber(selectedOpaqueState.version) ?? asNumber(selectedSnapshot.version) ?? "Not recorded"}
                   </div>
                 </div>
               </div>
@@ -759,9 +777,9 @@ export default function DataConversationsPage() {
               "No tool definitions recorded for this run."
             )}
             {renderRecordListSection(
-              "Tool Records",
+              "Tool Calls",
               toolRecords,
-              "No tool records captured for this run."
+              "No tool calls captured for this run."
             )}
             {renderRecordListSection(
               "Long-Term Memory Writes",
@@ -779,9 +797,9 @@ export default function DataConversationsPage() {
               "No runtime snapshot was captured for this run."
             )}
             {renderJsonSection(
-              "Artifacts",
+              "Artifact Summaries",
               selectedArtifacts,
-              "No runtime artifacts were captured for this run."
+              "No tool artifacts were captured for this run."
             )}
             {renderJsonSection(
               "Usage",
@@ -794,9 +812,9 @@ export default function DataConversationsPage() {
               "No error payload recorded for this run."
             )}
             {renderJsonSection(
-              "Raw Run Debug Payload",
-              selectedRun.debug_payload,
-              "No debug payload recorded for this run."
+              "Raw Run Snapshot",
+              selectedRun.snapshot,
+              "No runtime snapshot recorded for this run."
             )}
             {renderJsonSection(
               "Runtime Link During Run",
@@ -935,10 +953,11 @@ export default function DataConversationsPage() {
         )}
 
         <div className={styles.detailSection}>
-          <div className={styles.detailSectionTitle}>Last Assistant Summary</div>
+          <div className={styles.detailSectionTitle}>Last Turn Summary</div>
           <div className={styles.detailBox}>
-            {asString(shortTermMemoryProgress.last_assistant_summary) ||
-              "No assistant summary recorded."}
+            {asString(shortTermMemoryProgress.last_turn_summary) ||
+              asString(shortTermMemoryProgress.last_assistant_summary) ||
+              "No turn summary recorded."}
           </div>
         </div>
 
@@ -1005,38 +1024,36 @@ export default function DataConversationsPage() {
 
         {!selectedRun ? (
           <div className={styles.emptyState}>No runs stored.</div>
-        ) : selectedRun.events.length === 0 ? (
-          <div className={styles.emptyState}>No events recorded for the selected run.</div>
+        ) : selectedRun.tool_calls.length === 0 ? (
+          <div className={styles.emptyState}>No tool calls recorded for the selected run.</div>
         ) : (
           <div className={styles.eventList}>
-            {selectedRun.events.map((event) => (
-              <div key={event.id} className={styles.eventItem}>
+            {selectedRun.tool_calls.map((toolCall) => (
+              <div key={toolCall.id} className={styles.eventItem}>
                 <div className={styles.eventHeader}>
-                  <div className={styles.eventTitle}>{eventLabel(event)}</div>
+                  <div className={styles.eventTitle}>{toolCallLabel(toolCall)}</div>
                   <div className={styles.eventMeta}>
-                    seq {event.sequence} | {formatDate(event.created_at)}
+                    seq {toolCall.sequence} | {formatDate(toolCall.created_at)}
                   </div>
                 </div>
 
-                {eventSummary(event) && <div className={styles.eventBody}>{eventSummary(event)}</div>}
+                {toolCallSummary(toolCall) && <div className={styles.eventBody}>{toolCallSummary(toolCall)}</div>}
 
-                {isRecord(event.payload.args) && (
-                  <div className={styles.eventSubsection}>
-                    <div className={styles.eventSubsectionLabel}>Args</div>
-                    <pre className={styles.rawPre}>{stringifyJson(event.payload.args)}</pre>
-                  </div>
-                )}
+                <div className={styles.eventSubsection}>
+                  <div className={styles.eventSubsectionLabel}>Arguments</div>
+                  <pre className={styles.rawPre}>{stringifyJson(toolCall.arguments)}</pre>
+                </div>
 
-                {isRecord(event.payload.resource) && (
+                {toolCall.artifacts.length > 0 && (
                   <div className={styles.eventSubsection}>
-                    <div className={styles.eventSubsectionLabel}>Resource</div>
-                    <pre className={styles.rawPre}>{stringifyJson(event.payload.resource)}</pre>
+                    <div className={styles.eventSubsectionLabel}>Artifacts</div>
+                    <pre className={styles.rawPre}>{stringifyJson(toolCall.artifacts)}</pre>
                   </div>
                 )}
 
                 <details className={styles.rawDetails}>
-                  <summary className={styles.rawSummary}>View raw payload</summary>
-                  <pre className={styles.rawPre}>{stringifyJson(event.payload)}</pre>
+                  <summary className={styles.rawSummary}>View raw tool call</summary>
+                  <pre className={styles.rawPre}>{stringifyJson(toolCall)}</pre>
                 </details>
               </div>
             ))}
@@ -1090,8 +1107,8 @@ export default function DataConversationsPage() {
       <div className={styles.pageIntro}>
         <h2 className={styles.pageTitle}>Conversations</h2>
         <p className={styles.description}>
-          Inspect chat sessions from the new AgentRuntime architecture: runtime link, host context
-          state, run debug payloads, short-term memory, and derived long-term memory.
+          Inspect chat sessions from the new AgentRuntime architecture: runtime link, structured
+          run snapshots, tool calls, artifact summaries, short-term memory, and derived long-term memory.
         </p>
       </div>
 

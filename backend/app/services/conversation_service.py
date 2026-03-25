@@ -14,10 +14,12 @@ from app.agent_runtime.skill_bridge import SkillBridge
 from app.agent_runtime.tool_bridge import ToolBridge
 from app.agent_runtime.types import (
     AgentRuntimeLink,
+    AgentRuntimeSnapshot,
     AgentRuntimeSetup,
     AgentTurnInput,
     HostContextState,
     ResourceHandle,
+    ToolLoopResult,
     TurnMessage,
 )
 from app.providers.factory import create_provider
@@ -32,8 +34,7 @@ from app.skills.registry import skill_registry
 logger = logging.getLogger(__name__)
 
 MAX_TITLE_LENGTH = 60
-TOOL_RESULT_PREVIEW_LIMIT = 4000
-RUN_DEBUG_PAYLOAD_VERSION = 1
+RUNTIME_SNAPSHOT_VERSION = 3
 
 
 class ConversationService:
@@ -42,7 +43,7 @@ class ConversationService:
         session: AsyncSession,
         *,
         base_system_prompt_builder: Callable[[], str] = build_base_system_prompt,
-        tool_loop_runner: Callable[..., Awaitable[tuple[str, list[dict[str, Any]]]]] = run_native_agent_loop,
+        tool_loop_runner: Callable[..., Awaitable[ToolLoopResult]] = run_native_agent_loop,
     ):
         self.session = session
         self.provider_repo = ProviderRepository(session)
@@ -211,22 +212,26 @@ class ConversationService:
     async def _attach_fetched_pdfs_from_log(
         self,
         session_id: int,
-        tool_call_log: list[dict[str, Any]],
+        tool_calls: list[dict[str, Any]],
     ) -> None:
         resources: list[dict[str, Any]] = []
-        for log in tool_call_log:
-            if log.get("tool") != "fetch_pdf_and_upload":
+        for tool_call in tool_calls:
+            if tool_call.get("tool_name") != "fetch_pdf_and_upload":
                 continue
-            fetched = self._parse_fetch_pdf_tool_result(log.get("result", ""))
-            if not fetched:
-                continue
-            resources.append(
-                {
-                    "pdf_id": fetched["pdf_id"],
-                    "source_type": "fetched",
-                    "source_url": fetched.get("source_url"),
-                }
-            )
+            for artifact in tool_call.get("artifacts", []):
+                locator = artifact.get("locator", {}) if isinstance(artifact, dict) else {}
+                if not isinstance(locator, dict):
+                    continue
+                pdf_id = locator.get("pdf_id")
+                if not isinstance(pdf_id, int):
+                    continue
+                resources.append(
+                    {
+                        "pdf_id": pdf_id,
+                        "source_type": "fetched",
+                        "source_url": locator.get("source_url"),
+                    }
+                )
         await self.conversation_repo.attach_pdf_resources_bulk(session_id, resources, commit=False)
 
     async def _persist_runtime_state(
@@ -235,20 +240,13 @@ class ConversationService:
         session_id: int,
         runtime: NativeAgentRuntime,
         runtime_link: AgentRuntimeLink,
-        commit: bool = False,
-    ) -> dict[str, Any] | None:
+    ) -> AgentRuntimeSnapshot | None:
         await self.conversation_repo.update_short_term_memory(
             session_id,
             runtime.dump_short_term_memory(),
             commit=False,
         )
-        snapshot = await runtime.get_snapshot(runtime_link)
-        if snapshot is not None:
-            await self.agent_runtime_repo.save_snapshot(session_id, snapshot, commit=commit)
-            return snapshot.model_dump(mode="json")
-        elif commit:
-            await self.session.commit()
-        return None
+        return await runtime.get_snapshot(runtime_link)
 
     async def _write_long_term_memory(
         self,
@@ -257,7 +255,8 @@ class ConversationService:
         run_id: int,
         user_request: str,
         assistant_message: str,
-        tool_records: list[dict[str, Any]],
+        turn_summary: str | None,
+        tool_calls: list[dict[str, Any]],
         commit: bool = False,
     ) -> list[dict[str, Any]]:
         created_records: list[dict[str, Any]] = []
@@ -266,7 +265,8 @@ class ConversationService:
             run_id=run_id,
             user_request=user_request,
             assistant_message=assistant_message,
-            tool_records=tool_records,
+            turn_summary=turn_summary,
+            tool_calls=tool_calls,
             commit=commit,
         )
         if record is not None:
@@ -294,53 +294,114 @@ class ConversationService:
             "status": record.status,
         }
 
-    def _build_run_debug_payload(
+    def _build_runtime_snapshot(
         self,
         *,
+        base_snapshot: AgentRuntimeSnapshot | None,
         provider: Any,
         runtime_link: AgentRuntimeLink,
         context_sync_result: Any,
         host_context_state: HostContextState,
         turn_input: AgentTurnInput,
-        runtime_snapshot: dict[str, Any] | None,
-        tool_records: list[dict[str, Any]],
+        tool_calls: list[dict[str, Any]],
         long_term_memory_writes: list[dict[str, Any]],
         assistant_text: str | None,
+        turn_summary: str | None,
         status: str,
-        assistant_message_id: int | None = None,
-        artifacts: dict[str, Any] | None = None,
         usage: dict[str, Any] | None = None,
         error: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    ) -> AgentRuntimeSnapshot:
+        if base_snapshot is None:
+            base_snapshot = AgentRuntimeSnapshot(
+                runtime_name=runtime_link.runtime_name,
+                runtime_session_id=runtime_link.runtime_session_id,
+            )
+        return base_snapshot.model_copy(
+            update={
+                "opaque_state": {
+                    **base_snapshot.opaque_state,
+                    "version": RUNTIME_SNAPSHOT_VERSION,
+                },
+                "provider": {
+                    "name": provider.__class__.__name__,
+                    "model": getattr(provider, "model", None),
+                },
+                "runtime_link": self._serialize_runtime_link(runtime_link),
+                "context_sync": context_sync_result.model_dump(mode="json"),
+                "host_context_state": host_context_state.model_dump(mode="json"),
+                "turn_input": turn_input.model_dump(mode="json"),
+                "tool_calls": tool_calls,
+                "long_term_memory_writes": long_term_memory_writes,
+                "assistant_text": assistant_text,
+                "turn_summary": turn_summary,
+                "usage": usage,
+                "status": status,
+                "error": error,
+            }
+        )
+
+    @staticmethod
+    def _serialize_tool_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
         return {
-            "version": RUN_DEBUG_PAYLOAD_VERSION,
-            "provider": {
-                "name": provider.__class__.__name__,
-                "model": getattr(provider, "model", None),
-            },
-            "runtime_link": self._serialize_runtime_link(runtime_link),
-            "context_sync": context_sync_result.model_dump(mode="json"),
-            "host_context_state": host_context_state.model_dump(mode="json"),
-            "turn_input": turn_input.model_dump(mode="json"),
-            "runtime_snapshot": runtime_snapshot,
-            "tool_records": tool_records,
-            "long_term_memory_writes": long_term_memory_writes,
-            "assistant_text": assistant_text,
-            "assistant_message_id": assistant_message_id,
-            "artifacts": artifacts or {},
-            "usage": usage,
-            "status": status,
-            "error": error,
+            "kind": artifact.get("kind"),
+            "label": artifact.get("label"),
+            "summary": artifact.get("summary"),
+            "summary_format": artifact.get("summary_format"),
+            "locator": artifact.get("locator", {}),
+            "replay": artifact.get("replay"),
+            "id": artifact.get("id"),
         }
 
-    async def _persist_run_debug_payload(
+    def _serialize_tool_call(self, tool_call: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "tool_name": tool_call.get("tool_name"),
+            "call_id": tool_call.get("call_id"),
+            "provider_item_id": tool_call.get("provider_item_id"),
+            "display_name": tool_call.get("display_name"),
+            "activity_label": tool_call.get("activity_label"),
+            "arguments": tool_call.get("arguments", {}),
+            "success": tool_call.get("success", True),
+            "status": tool_call.get("status", "completed"),
+            "error_text": tool_call.get("error_text"),
+            "output": tool_call.get("output", {}),
+            "artifacts": [
+                self._serialize_tool_artifact(artifact)
+                for artifact in tool_call.get("artifacts", [])
+                if isinstance(artifact, dict)
+            ],
+            "started_at": tool_call.get("started_at"),
+            "finished_at": tool_call.get("finished_at"),
+        }
+
+    async def _persist_tool_calls(
         self,
         *,
         run_id: int,
-        payload: dict[str, Any],
+        tool_calls: list[dict[str, Any]],
         commit: bool = False,
-    ) -> None:
-        await self.conversation_repo.save_run_debug_payload(run_id, payload, commit=commit)
+    ) -> list[dict[str, Any]]:
+        await self.conversation_repo.save_tool_calls(run_id, tool_calls, commit=commit)
+        return [self._serialize_tool_call(tool_call) for tool_call in tool_calls]
+
+    @staticmethod
+    def _extract_partial_tool_calls(exc: Exception) -> list[dict[str, Any]]:
+        partial = getattr(exc, "tool_calls", None)
+        if not isinstance(partial, list):
+            return []
+        serialized: list[dict[str, Any]] = []
+        for item in partial:
+            if hasattr(item, "model_dump"):
+                serialized.append(item.model_dump(mode="json"))
+            elif isinstance(item, dict):
+                serialized.append(item)
+        return serialized
+
+    @staticmethod
+    def _error_payload(exc: Exception) -> dict[str, Any]:
+        return {
+            "type": getattr(exc, "error_type", exc.__class__.__name__),
+            "message": getattr(exc, "error_message", str(exc)),
+        }
 
     async def delete_session(self, session_id: int) -> bool:
         if not await self.conversation_repo.session_exists(session_id):
@@ -359,7 +420,7 @@ class ConversationService:
         session_id: int | None = None,
         pdf_ids: list[int] | None = None,
     ) -> tuple[str, str | None, int, list[dict]]:
-        """Returns (content, model_name, session_id, tool_call_log)."""
+        """Returns (content, model_name, session_id, tool_calls)."""
         self._validate_request_messages(user_messages)
         sid, session_created = await self._ensure_session(
             session_id, user_messages[-1].content if user_messages else "New Chat"
@@ -400,40 +461,46 @@ class ConversationService:
             try:
                 output = await runtime.run_turn(runtime_link, turn_input)
             except Exception as exc:
+                partial_tool_calls = self._extract_partial_tool_calls(exc)
                 await self.conversation_repo.update_run(run.id, status="failed", commit=False)
-                runtime_snapshot = await self._persist_runtime_state(
+                await self._attach_initial_pdf_ids(sid, pdf_ids)
+                await self._attach_fetched_pdfs_from_log(sid, partial_tool_calls)
+                serialized_tool_calls = await self._persist_tool_calls(
+                    run_id=run.id,
+                    tool_calls=partial_tool_calls,
+                    commit=False,
+                )
+                base_snapshot = await self._persist_runtime_state(
                     session_id=sid,
                     runtime=runtime,
                     runtime_link=runtime_link,
-                    commit=False,
                 )
-                await self._attach_initial_pdf_ids(sid, pdf_ids)
-                await self._persist_run_debug_payload(
+                snapshot = self._build_runtime_snapshot(
+                    base_snapshot=base_snapshot,
+                    provider=provider,
+                    runtime_link=runtime_link,
+                    context_sync_result=context_sync_result,
+                    host_context_state=host_context_state,
+                    turn_input=turn_input,
+                    tool_calls=serialized_tool_calls,
+                    long_term_memory_writes=[],
+                    assistant_text=None,
+                    turn_summary=None,
+                    status="failed",
+                    error=self._error_payload(exc),
+                )
+                await self.agent_runtime_repo.save_snapshot(
+                    sid,
+                    snapshot,
                     run_id=run.id,
-                    payload=self._build_run_debug_payload(
-                        provider=provider,
-                        runtime_link=runtime_link,
-                        context_sync_result=context_sync_result,
-                        host_context_state=host_context_state,
-                        turn_input=turn_input,
-                        runtime_snapshot=runtime_snapshot,
-                        tool_records=[],
-                        long_term_memory_writes=[],
-                        assistant_text=None,
-                        status="failed",
-                        error={
-                            "type": exc.__class__.__name__,
-                            "message": str(exc),
-                        },
-                    ),
                     commit=False,
                 )
                 await self.session.commit()
                 raise
 
-            tool_call_log = [record.model_dump(mode="json") for record in output.tool_records]
+            tool_calls = [record.model_dump() for record in output.tool_calls]
             await self._attach_initial_pdf_ids(sid, pdf_ids)
-            await self._attach_fetched_pdfs_from_log(sid, tool_call_log)
+            await self._attach_fetched_pdfs_from_log(sid, tool_calls)
 
             assistant_message = await self.conversation_repo.add_message(
                 sid,
@@ -447,47 +514,47 @@ class ConversationService:
                 assistant_message_id=assistant_message.id,
                 commit=False,
             )
-            await self._persist_tool_log(
-                run.id,
-                tool_call_log,
-                assistant_message.id,
+            serialized_tool_calls = await self._persist_tool_calls(
+                run_id=run.id,
+                tool_calls=tool_calls,
                 commit=False,
             )
-            runtime_snapshot = await self._persist_runtime_state(
+            base_snapshot = await self._persist_runtime_state(
                 session_id=sid,
                 runtime=runtime,
                 runtime_link=runtime_link,
-                commit=False,
             )
             long_term_memory_writes = await self._write_long_term_memory(
                 session_id=sid,
                 run_id=run.id,
                 user_request=current_user_message.content,
                 assistant_message=output.assistant_text,
-                tool_records=tool_call_log,
+                turn_summary=output.turn_summary,
+                tool_calls=tool_calls,
                 commit=False,
             )
-            await self._persist_run_debug_payload(
+            snapshot = self._build_runtime_snapshot(
+                base_snapshot=base_snapshot,
+                provider=provider,
+                runtime_link=runtime_link,
+                context_sync_result=context_sync_result,
+                host_context_state=host_context_state,
+                turn_input=turn_input,
+                tool_calls=serialized_tool_calls,
+                long_term_memory_writes=long_term_memory_writes,
+                assistant_text=output.assistant_text,
+                turn_summary=output.turn_summary,
+                usage=output.usage,
+                status=output.status,
+            )
+            await self.agent_runtime_repo.save_snapshot(
+                sid,
+                snapshot,
                 run_id=run.id,
-                payload=self._build_run_debug_payload(
-                    provider=provider,
-                    runtime_link=runtime_link,
-                    context_sync_result=context_sync_result,
-                    host_context_state=host_context_state,
-                    turn_input=turn_input,
-                    runtime_snapshot=runtime_snapshot,
-                    tool_records=tool_call_log,
-                    long_term_memory_writes=long_term_memory_writes,
-                    assistant_text=output.assistant_text,
-                    assistant_message_id=assistant_message.id,
-                    artifacts=output.artifacts,
-                    usage=output.usage,
-                    status=output.status,
-                ),
                 commit=False,
             )
             await self.session.commit()
-            return output.assistant_text, provider.model, sid, tool_call_log
+            return output.assistant_text, provider.model, sid, tool_calls
 
     async def chat_stream(
         self,
@@ -534,70 +601,23 @@ class ConversationService:
 
                 queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
                 sequence = 0
-                pending_events: list[dict[str, Any]] = []
 
-                async def emit(
-                    event: dict[str, Any],
-                    *,
-                    persist: bool = True,
-                    persist_payload: dict[str, Any] | None = None,
-                ) -> None:
+                async def emit(event: dict[str, Any]) -> None:
                     nonlocal sequence
                     sequence += 1
                     payload = {"sequence": sequence, **event}
-                    if persist:
-                        event_for_storage = persist_payload or event
-                        pending_events.append(
-                            {
-                                "sequence": sequence,
-                                "event_type": event_for_storage["type"],
-                                "payload": {"sequence": sequence, **event_for_storage},
-                            }
-                        )
                     await queue.put(payload)
 
-                async def flush_pending_events(*, commit: bool) -> None:
-                    nonlocal pending_events
-                    if not pending_events:
-                        return
-                    await self.conversation_repo.add_run_events_bulk(
-                        run.id,
-                        pending_events,
-                        commit=commit,
-                    )
-                    pending_events = []
-
                 async def on_runtime_event(event: dict[str, Any]) -> None:
-                    payload = dict(event)
-                    persist_payload = dict(event)
-                    if payload.get("type") == "tool.finished":
-                        raw_result = payload.get("result")
-                        if isinstance(raw_result, str):
-                            persist_payload["tool_result"] = raw_result
-                            persist_payload["tool_result_preview"] = self._trim_tool_result(
-                                raw_result,
-                                limit=TOOL_RESULT_PREVIEW_LIMIT,
-                            )
-                            if payload.get("success") is False:
-                                payload["error_message"] = self._extract_error_message(raw_result)
-                            payload.pop("result", None)
-                            fetched = None
-                            if payload.get("tool_name") == "fetch_pdf_and_upload":
-                                fetched = self._parse_fetch_pdf_tool_result(raw_result)
-                            if fetched:
-                                payload["resource"] = fetched
-                                persist_payload["resource"] = fetched
-                    await emit(payload, persist_payload=persist_payload)
-                    if persist_payload.get("type") == "tool.finished":
-                        await flush_pending_events(commit=True)
+                    await emit(dict(event))
 
                 async def produce() -> None:
                     try:
                         await emit({"type": "run.started", "run_id": run.id, "status": "running"})
                         output = await runtime.run_turn(runtime_link, turn_input, emit=on_runtime_event)
-                        tool_call_log = [record.model_dump(mode="json") for record in output.tool_records]
+                        tool_calls = [record.model_dump() for record in output.tool_calls]
                         await self._attach_initial_pdf_ids(sid, pdf_ids)
-                        await self._attach_fetched_pdfs_from_log(sid, tool_call_log)
+                        await self._attach_fetched_pdfs_from_log(sid, tool_calls)
                         assistant_message = await self.conversation_repo.add_message(
                             sid,
                             "assistant",
@@ -610,37 +630,42 @@ class ConversationService:
                             assistant_message_id=assistant_message.id,
                             commit=False,
                         )
-                        runtime_snapshot = await self._persist_runtime_state(
+                        serialized_tool_calls = await self._persist_tool_calls(
+                            run_id=run.id,
+                            tool_calls=tool_calls,
+                            commit=False,
+                        )
+                        base_snapshot = await self._persist_runtime_state(
                             session_id=sid,
                             runtime=runtime,
                             runtime_link=runtime_link,
-                            commit=False,
                         )
                         long_term_memory_writes = await self._write_long_term_memory(
                             session_id=sid,
                             run_id=run.id,
                             user_request=current_user_message.content,
                             assistant_message=output.assistant_text,
-                            tool_records=tool_call_log,
+                            tool_calls=tool_calls,
                             commit=False,
                         )
-                        await self._persist_run_debug_payload(
+                        snapshot = self._build_runtime_snapshot(
+                            base_snapshot=base_snapshot,
+                            provider=provider,
+                            runtime_link=runtime_link,
+                            context_sync_result=context_sync_result,
+                            host_context_state=host_context_state,
+                            turn_input=turn_input,
+                            tool_calls=serialized_tool_calls,
+                            long_term_memory_writes=long_term_memory_writes,
+                            assistant_text=output.assistant_text,
+                            turn_summary=output.turn_summary,
+                            usage=output.usage,
+                            status=output.status,
+                        )
+                        await self.agent_runtime_repo.save_snapshot(
+                            sid,
+                            snapshot,
                             run_id=run.id,
-                            payload=self._build_run_debug_payload(
-                                provider=provider,
-                                runtime_link=runtime_link,
-                                context_sync_result=context_sync_result,
-                                host_context_state=host_context_state,
-                                turn_input=turn_input,
-                                runtime_snapshot=runtime_snapshot,
-                                tool_records=tool_call_log,
-                                long_term_memory_writes=long_term_memory_writes,
-                                assistant_text=output.assistant_text,
-                                assistant_message_id=assistant_message.id,
-                                artifacts=output.artifacts,
-                                usage=output.usage,
-                                status=output.status,
-                            ),
                             commit=False,
                         )
                         await emit(
@@ -652,14 +677,14 @@ class ConversationService:
                             }
                         )
                         for chunk in _chunk_text(output.assistant_text, 20):
-                            await emit({"type": "answer.delta", "delta": chunk}, persist=False)
+                            await emit({"type": "answer.delta", "delta": chunk})
                         await emit(
                             {
                                 "type": "answer.completed",
                                 "assistant_message_id": assistant_message.id,
                                 "content": output.assistant_text,
+                                "turn_summary": output.turn_summary,
                             },
-                            persist=False,
                         )
                         await emit(
                             {
@@ -669,78 +694,88 @@ class ConversationService:
                                 "status": output.status,
                             }
                         )
-                        await flush_pending_events(commit=False)
                         await self.session.commit()
                     except ValueError as exc:
+                        partial_tool_calls = self._extract_partial_tool_calls(exc)
                         await self.conversation_repo.update_run(run.id, status="failed", commit=False)
-                        runtime_snapshot = await self._persist_runtime_state(
+                        await self._attach_initial_pdf_ids(sid, pdf_ids)
+                        await self._attach_fetched_pdfs_from_log(sid, partial_tool_calls)
+                        serialized_tool_calls = await self._persist_tool_calls(
+                            run_id=run.id,
+                            tool_calls=partial_tool_calls,
+                            commit=False,
+                        )
+                        base_snapshot = await self._persist_runtime_state(
                             session_id=sid,
                             runtime=runtime,
                             runtime_link=runtime_link,
-                            commit=False,
                         )
-                        await self._attach_initial_pdf_ids(sid, pdf_ids)
-                        await self._persist_run_debug_payload(
+                        snapshot = self._build_runtime_snapshot(
+                            base_snapshot=base_snapshot,
+                            provider=provider,
+                            runtime_link=runtime_link,
+                            context_sync_result=context_sync_result,
+                            host_context_state=host_context_state,
+                            turn_input=turn_input,
+                            tool_calls=serialized_tool_calls,
+                            long_term_memory_writes=[],
+                            assistant_text=None,
+                            turn_summary=None,
+                            status="failed",
+                            error=self._error_payload(exc),
+                        )
+                        await self.agent_runtime_repo.save_snapshot(
+                            sid,
+                            snapshot,
                             run_id=run.id,
-                            payload=self._build_run_debug_payload(
-                                provider=provider,
-                                runtime_link=runtime_link,
-                                context_sync_result=context_sync_result,
-                                host_context_state=host_context_state,
-                                turn_input=turn_input,
-                                runtime_snapshot=runtime_snapshot,
-                                tool_records=[],
-                                long_term_memory_writes=[],
-                                assistant_text=None,
-                                status="failed",
-                                error={
-                                    "type": exc.__class__.__name__,
-                                    "message": str(exc),
-                                },
-                            ),
                             commit=False,
                         )
                         await emit({"type": "error", "message": str(exc), "run_id": run.id})
-                        await flush_pending_events(commit=False)
                         await self.session.commit()
                     except Exception as exc:
                         logger.exception("Streaming run failed")
+                        partial_tool_calls = self._extract_partial_tool_calls(exc)
+                        error_payload = self._error_payload(exc)
                         await self.conversation_repo.update_run(run.id, status="failed", commit=False)
-                        runtime_snapshot = await self._persist_runtime_state(
+                        await self._attach_initial_pdf_ids(sid, pdf_ids)
+                        await self._attach_fetched_pdfs_from_log(sid, partial_tool_calls)
+                        serialized_tool_calls = await self._persist_tool_calls(
+                            run_id=run.id,
+                            tool_calls=partial_tool_calls,
+                            commit=False,
+                        )
+                        base_snapshot = await self._persist_runtime_state(
                             session_id=sid,
                             runtime=runtime,
                             runtime_link=runtime_link,
-                            commit=False,
                         )
-                        await self._attach_initial_pdf_ids(sid, pdf_ids)
-                        await self._persist_run_debug_payload(
+                        snapshot = self._build_runtime_snapshot(
+                            base_snapshot=base_snapshot,
+                            provider=provider,
+                            runtime_link=runtime_link,
+                            context_sync_result=context_sync_result,
+                            host_context_state=host_context_state,
+                            turn_input=turn_input,
+                            tool_calls=serialized_tool_calls,
+                            long_term_memory_writes=[],
+                            assistant_text=None,
+                            turn_summary=None,
+                            status="failed",
+                            error=error_payload,
+                        )
+                        await self.agent_runtime_repo.save_snapshot(
+                            sid,
+                            snapshot,
                             run_id=run.id,
-                            payload=self._build_run_debug_payload(
-                                provider=provider,
-                                runtime_link=runtime_link,
-                                context_sync_result=context_sync_result,
-                                host_context_state=host_context_state,
-                                turn_input=turn_input,
-                                runtime_snapshot=runtime_snapshot,
-                                tool_records=[],
-                                long_term_memory_writes=[],
-                                assistant_text=None,
-                                status="failed",
-                                error={
-                                    "type": exc.__class__.__name__,
-                                    "message": str(exc),
-                                },
-                            ),
                             commit=False,
                         )
                         await emit(
                             {
                                 "type": "error",
-                                "message": "LLM provider request failed",
+                                "message": error_payload["message"],
                                 "run_id": run.id,
                             }
                         )
-                        await flush_pending_events(commit=False)
                         await self.session.commit()
                     finally:
                         await queue.put(None)
@@ -754,124 +789,6 @@ class ConversationService:
                 await producer
 
         return _generate(), sid
-
-    @staticmethod
-    def _parse_fetch_pdf_tool_result(result: str) -> dict | None:
-        try:
-            payload = json.loads(result)
-        except Exception:
-            return None
-
-        if not isinstance(payload, dict):
-            return None
-
-        pdf_id = payload.get("pdf_id")
-        if not isinstance(pdf_id, int):
-            return None
-        parsed = {"pdf_id": pdf_id}
-        source_url = payload.get("source_url")
-        filename = payload.get("filename")
-        status = payload.get("status")
-        if source_url is not None:
-            parsed["source_url"] = source_url
-        if filename is not None:
-            parsed["filename"] = filename
-        if status is not None:
-            parsed["status"] = status
-        return parsed
-
-    @staticmethod
-    def _trim_tool_result(result: str, limit: int = 500) -> str:
-        if len(result) <= limit:
-            return result
-        head = max(1, int(limit * 0.65))
-        tail = max(1, limit - head - len("\n...[truncated]...\n"))
-        return result[:head] + "\n...[truncated]...\n" + result[-tail:]
-
-    @staticmethod
-    def _extract_error_message(result: str) -> str:
-        text = result.strip()
-        if text.startswith("Error:"):
-            text = text[len("Error:") :].strip()
-        return text
-
-    async def _persist_tool_log(
-        self,
-        run_id: int,
-        tool_call_log: list[dict[str, Any]],
-        assistant_message_id: int | None = None,
-        *,
-        commit: bool = True,
-    ) -> None:
-        sequence = 0
-        events: list[dict[str, Any]] = []
-
-        def add(event_type: str, payload: dict[str, Any]) -> None:
-            nonlocal sequence
-            sequence += 1
-            events.append(
-                {
-                    "sequence": sequence,
-                    "event_type": event_type,
-                    "payload": {"sequence": sequence, "type": event_type, **payload},
-                }
-            )
-
-        add("run.started", {"run_id": run_id, "status": "running"})
-        add(
-            "status",
-            {
-                "status": "thinking",
-                "label": "Thinking",
-                "detail": "Planning the next step",
-            },
-        )
-
-        for log in tool_call_log:
-            add(
-                "tool.started",
-                {
-                    "tool_call_id": log.get("tool_call_id"),
-                    "tool_name": log.get("tool"),
-                    "tool_display_name": log.get("tool_display_name"),
-                    "tool_activity_label": log.get("tool_activity_label"),
-                    "args": log.get("args", {}),
-                },
-            )
-            tool_finished_payload = {
-                "tool_call_id": log.get("tool_call_id"),
-                "tool_name": log.get("tool"),
-                "tool_display_name": log.get("tool_display_name"),
-                "tool_activity_label": log.get("tool_activity_label"),
-                "args": log.get("args", {}),
-                "success": log.get("success", True),
-            }
-            raw_result = log.get("result", "")
-            if isinstance(raw_result, str) and raw_result:
-                tool_finished_payload["tool_result"] = raw_result
-                tool_finished_payload["tool_result_preview"] = self._trim_tool_result(
-                    raw_result,
-                    limit=TOOL_RESULT_PREVIEW_LIMIT,
-                )
-            if log.get("success") is False:
-                tool_finished_payload["error_message"] = self._extract_error_message(raw_result)
-            fetched = None
-            if log.get("tool") == "fetch_pdf_and_upload":
-                fetched = self._parse_fetch_pdf_tool_result(raw_result)
-            if fetched:
-                tool_finished_payload["resource"] = fetched
-            add("tool.finished", tool_finished_payload)
-
-        add(
-            "run.completed",
-            {
-                "run_id": run_id,
-                "assistant_message_id": assistant_message_id,
-                "status": "completed",
-            },
-        )
-        await self.conversation_repo.add_run_events_bulk(run_id, events, commit=commit)
-
 
 def _chunk_text(text: str, size: int) -> list[str]:
     return [text[i : i + size] for i in range(0, len(text), size)]

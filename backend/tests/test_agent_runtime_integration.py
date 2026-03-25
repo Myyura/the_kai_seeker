@@ -3,6 +3,7 @@ import json
 import pytest
 from sqlalchemy import select
 
+from app.agent_runtime.types import ToolArtifact, ToolCallRecord, ToolLoopResult
 from app.models.long_term_memory import LongTermMemoryRecord
 from app.models.pdf_document import PdfDocument
 from app.models.study_target import StudyTarget
@@ -29,7 +30,7 @@ async def test_runtime_link_keeps_first_base_system_prompt(db_session, monkeypat
     )
 
     async def fake_run_agent_loop(provider, messages, allowed_tool_names=None, on_event=None):  # type: ignore[no-untyped-def]
-        return "first answer", []
+        return ToolLoopResult(assistant_text="first answer", turn_summary="first answer", tool_calls=[])
 
     service = ConversationService(db_session, tool_loop_runner=fake_run_agent_loop)
     _content, _model, sid, _log = await service.chat([ChatMessageIn(role="user", content="hello")])
@@ -74,7 +75,7 @@ async def test_resource_handles_separate_session_and_transient(db_session, monke
 
     async def fake_run_agent_loop(provider, messages, allowed_tool_names=None, on_event=None):  # type: ignore[no-untyped-def]
         captured_turns.append([message.content for message in messages])
-        return "ok", []
+        return ToolLoopResult(assistant_text="ok", turn_summary="ok", tool_calls=[])
 
     service = ConversationService(db_session, tool_loop_runner=fake_run_agent_loop)
     _content, _model, sid, _log = await service.chat(
@@ -83,8 +84,8 @@ async def test_resource_handles_separate_session_and_transient(db_session, monke
     )
     await service.chat([ChatMessageIn(role="user", content="Continue.")], session_id=sid)
 
-    first_context = captured_turns[0][1]
-    second_context = captured_turns[1][1]
+    first_context = captured_turns[0][2]
+    second_context = captured_turns[1][2]
 
     assert "### Session Resources\n- None." in first_context
     assert f"### Turn Resources\n- pdf:{pdf.id}" in first_context
@@ -115,7 +116,11 @@ async def test_memory_pack_uses_study_targets_without_copying_them(db_session, m
     await db_session.commit()
 
     async def fake_run_agent_loop(provider, messages, allowed_tool_names=None, on_event=None):  # type: ignore[no-untyped-def]
-        return "We should focus on algorithms.", []
+        return ToolLoopResult(
+            assistant_text="We should focus on algorithms.",
+            turn_summary="Focus on algorithms.",
+            tool_calls=[],
+        )
 
     service = ConversationService(db_session, tool_loop_runner=fake_run_agent_loop)
     await service.chat([ChatMessageIn(role="user", content="Give me a summary.")])
@@ -130,7 +135,7 @@ async def test_memory_pack_uses_study_targets_without_copying_them(db_session, m
 
 
 @pytest.mark.asyncio
-async def test_run_debug_payload_persists_runtime_inputs_and_outputs(db_session) -> None:
+async def test_run_snapshot_persists_runtime_inputs_and_outputs(db_session) -> None:
     provider_repo = ProviderRepository(db_session)
     await provider_repo.create(
         ProviderSettingCreate(
@@ -154,7 +159,11 @@ async def test_run_debug_payload_persists_runtime_inputs_and_outputs(db_session)
     await db_session.refresh(pdf)
 
     async def fake_run_agent_loop(provider, messages, allowed_tool_names=None, on_event=None):  # type: ignore[no-untyped-def]
-        return "Use the math-heavy plan.", []
+        return ToolLoopResult(
+            assistant_text="Use the math-heavy plan.",
+            turn_summary="Recommended the math-heavy plan.",
+            tool_calls=[],
+        )
 
     service = ConversationService(db_session, tool_loop_runner=fake_run_agent_loop)
     _content, _model, sid, _log = await service.chat(
@@ -165,21 +174,22 @@ async def test_run_debug_payload_persists_runtime_inputs_and_outputs(db_session)
     conversation = await ConversationRepository(db_session).get_session(sid)
     assert conversation is not None
     run = conversation.runs[-1]
-    assert run.debug_payload is not None
+    assert run.runtime_snapshots
 
-    payload = json.loads(run.debug_payload.payload)
+    payload = json.loads(run.runtime_snapshots[-1].snapshot_payload)
     assert payload["status"] == "completed"
     assert payload["runtime_link"]["runtime_name"] == "native"
     assert payload["context_sync"]["context_version"] == payload["host_context_state"]["context_version"]
     assert payload["host_context_state"]["memory_pack"]["study_targets"][0]["school_id"] == "kyoto-university"
     assert payload["turn_input"]["transient_resource_handles"][0]["resource_id"] == str(pdf.id)
-    assert payload["runtime_snapshot"]["short_term_memory"]["progress"]["last_assistant_summary"]
+    assert payload["short_term_memory"]["progress"]["last_turn_summary"]
     assert payload["long_term_memory_writes"]
     assert payload["assistant_text"] == "Use the math-heavy plan."
+    assert payload["turn_summary"] == "Recommended the math-heavy plan."
 
 
 @pytest.mark.asyncio
-async def test_failed_run_persists_debug_payload(db_session) -> None:
+async def test_failed_run_persists_snapshot(db_session) -> None:
     provider_repo = ProviderRepository(db_session)
     await provider_repo.create(
         ProviderSettingCreate(
@@ -203,14 +213,130 @@ async def test_failed_run_persists_debug_payload(db_session) -> None:
     conversation = await ConversationRepository(db_session).get_session(sessions[0].id)
     assert conversation is not None
     run = conversation.runs[-1]
-    assert run.debug_payload is not None
+    assert run.runtime_snapshots
 
-    payload = json.loads(run.debug_payload.payload)
+    payload = json.loads(run.runtime_snapshots[-1].snapshot_payload)
     assert payload["status"] == "failed"
     assert payload["assistant_text"] is None
-    assert payload["tool_records"] == []
+    assert payload["tool_calls"] == []
     assert payload["error"]["type"] == "RuntimeError"
     assert payload["error"]["message"] == "boom"
+
+
+@pytest.mark.asyncio
+async def test_failed_run_persists_partial_tool_calls(db_session) -> None:
+    provider_repo = ProviderRepository(db_session)
+    await provider_repo.create(
+        ProviderSettingCreate(
+            provider="openai",
+            api_key="secret",
+            base_url="https://api.openai.com/v1",
+            model="gpt-test",
+        )
+    )
+
+    partial_tool_call = ToolCallRecord(
+        tool_name="query_pdf_details",
+        call_id="tool-1",
+        arguments={"pdf_id": 15, "question": "有没有特殊材料"},
+        success=True,
+        status="completed",
+        output={
+            "ok": True,
+            "call_id": "tool-1",
+            "tool_name": "query_pdf_details",
+            "artifacts": [
+                {
+                    "kind": "pdf_query",
+                    "label": "PDF detail query",
+                    "summary": "No matching snippets found for '有没有特殊材料' in PDF 15.",
+                    "locator": {"pdf_id": 15, "question": "有没有特殊材料", "no_match": True},
+                }
+            ],
+        },
+        artifacts=[
+            ToolArtifact(
+                kind="pdf_query",
+                label="PDF detail query",
+                summary="No matching snippets found for '有没有特殊材料' in PDF 15.",
+                locator={"pdf_id": 15, "question": "有没有特殊材料", "no_match": True},
+                replay={
+                    "tool_name": "query_pdf_details",
+                    "arguments": {"pdf_id": 15, "question": "有没有特殊材料"},
+                },
+            )
+        ],
+    )
+
+    class FakeLoopError(Exception):
+        def __init__(self) -> None:
+            super().__init__("structured response parse failed")
+            self.tool_calls = [partial_tool_call]
+            self.error_type = "ValueError"
+            self.error_message = "structured response parse failed"
+
+    async def fake_run_agent_loop(provider, messages, allowed_tool_names=None, on_event=None):  # type: ignore[no-untyped-def]
+        raise FakeLoopError()
+
+    service = ConversationService(db_session, tool_loop_runner=fake_run_agent_loop)
+
+    with pytest.raises(FakeLoopError):
+        await service.chat([ChatMessageIn(role="user", content="帮我继续找材料要求")])
+
+    sessions = await ConversationRepository(db_session).list_sessions()
+    conversation = await ConversationRepository(db_session).get_session(sessions[0].id)
+    assert conversation is not None
+    run = conversation.runs[-1]
+    assert run.status == "failed"
+    assert len(run.tool_calls) == 1
+    assert run.tool_calls[0].tool_name == "query_pdf_details"
+    assert run.tool_calls[0].artifacts[0].summary.startswith("No matching snippets found")
+
+    payload = json.loads(run.runtime_snapshots[-1].snapshot_payload)
+    assert payload["status"] == "failed"
+    assert len(payload["tool_calls"]) == 1
+    assert payload["tool_calls"][0]["tool_name"] == "query_pdf_details"
+    assert payload["error"]["type"] == "ValueError"
+
+
+@pytest.mark.asyncio
+async def test_session_insight_stores_full_content_and_compact_summary(db_session) -> None:
+    provider_repo = ProviderRepository(db_session)
+    await provider_repo.create(
+        ProviderSettingCreate(
+            provider="openai",
+            api_key="secret",
+            base_url="https://api.openai.com/v1",
+            model="gpt-test",
+        )
+    )
+
+    user_request = "第一行问题\n第二行问题"
+    assistant_message = "这是一个比较长的回答，用来验证 session insight 的 summary 只保留紧凑结果，而 content 保留完整内容。"
+    turn_summary = "给出紧凑的回合摘要。"
+
+    async def fake_run_agent_loop(provider, messages, allowed_tool_names=None, on_event=None):  # type: ignore[no-untyped-def]
+        return ToolLoopResult(
+            assistant_text=assistant_message,
+            turn_summary=turn_summary,
+            tool_calls=[],
+        )
+
+    service = ConversationService(db_session, tool_loop_runner=fake_run_agent_loop)
+    _content, _model, sid, _log = await service.chat([ChatMessageIn(role="user", content=user_request)])
+
+    records = await LongTermMemoryRepository(db_session).list_by_source_session(sid)
+    session_insight = next(record for record in records if record.memory_type == "session_insight")
+
+    assert session_insight.content != session_insight.summary
+    assert "User request:\n第一行问题\n第二行问题" in session_insight.content
+    assert "Assistant outcome:\n" in session_insight.content
+    assert "Turn summary:\n给出紧凑的回合摘要。" in session_insight.content
+    assert session_insight.summary is not None
+    assert session_insight.summary.startswith(user_request)
+    assert "Outcome: 给出紧凑的回合摘要。" in session_insight.summary
+    assert len(session_insight.summary) < len(session_insight.content)
+    assert assistant_message not in session_insight.summary
 
 
 @pytest.mark.asyncio
@@ -264,7 +390,11 @@ async def test_delete_session_removes_derived_long_term_memory(db_session) -> No
     )
 
     async def fake_run_agent_loop(provider, messages, allowed_tool_names=None, on_event=None):  # type: ignore[no-untyped-def]
-        return "A focused answer.", []
+        return ToolLoopResult(
+            assistant_text="A focused answer.",
+            turn_summary="A focused answer.",
+            tool_calls=[],
+        )
 
     service = ConversationService(db_session, tool_loop_runner=fake_run_agent_loop)
     _content, _model, sid, _log = await service.chat([ChatMessageIn(role="user", content="Remember this.")])

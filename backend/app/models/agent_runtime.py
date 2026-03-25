@@ -45,6 +45,11 @@ class AgentRuntimeSnapshotRecord(Base):
         ForeignKey("chat_sessions.id", ondelete="CASCADE"),
         nullable=False,
     )
+    run_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("chat_runs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     runtime_name: Mapped[str] = mapped_column(String(64), nullable=False)
     runtime_session_id: Mapped[str] = mapped_column(String(255), nullable=False)
     snapshot_payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
@@ -53,3 +58,4 @@ class AgentRuntimeSnapshotRecord(Base):
     )
 
     session: Mapped["ChatSession"] = relationship(back_populates="runtime_snapshots")
+    run: Mapped["ChatRun | None"] = relationship(back_populates="runtime_snapshots")

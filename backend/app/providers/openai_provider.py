@@ -26,12 +26,21 @@ class OpenAIProvider(BaseLLMProvider):
             "Content-Type": "application/json",
         }
 
-    def _build_body(self, messages: list[ProviderMessage], stream: bool = False) -> dict:
-        return {
+    def _build_body(
+        self,
+        messages: list[ProviderMessage],
+        *,
+        stream: bool = False,
+        json_mode: bool = False,
+    ) -> dict:
+        body = {
             "model": self.model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
             "stream": stream,
         }
+        if json_mode:
+            body["response_format"] = {"type": "json_object"}
+        return body
 
     async def chat(self, messages: list[ProviderMessage]) -> ChatResponse:
         url = f"{self.base_url}/chat/completions"
@@ -41,6 +50,26 @@ class OpenAIProvider(BaseLLMProvider):
             resp = await client.post(url, headers=self._headers(), json=body)
             resp.raise_for_status()
             data = resp.json()
+
+        choice = data["choices"][0]
+        return ChatResponse(
+            content=choice["message"]["content"],
+            model=data.get("model", self.model),
+            usage=data.get("usage"),
+        )
+
+    async def chat_json(self, messages: list[ProviderMessage]) -> ChatResponse:
+        url = f"{self.base_url}/chat/completions"
+        body = self._build_body(messages, stream=False, json_mode=True)
+
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                resp = await client.post(url, headers=self._headers(), json=body)
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.HTTPStatusError:
+            logger.warning("JSON mode not supported by provider, falling back to plain chat")
+            return await self.chat(messages)
 
         choice = data["choices"][0]
         return ChatResponse(

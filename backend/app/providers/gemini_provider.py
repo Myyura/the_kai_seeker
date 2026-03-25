@@ -21,6 +21,7 @@ class GeminiProvider(BaseLLMProvider):
         super().__init__(api_key, base_url, model)
         self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.model = model or DEFAULT_MODEL
+        self._json_mode_supported: bool | None = None
 
     def _build_contents(self, messages: list[ProviderMessage]) -> tuple[list[dict], str | None]:
         """Convert provider messages into Gemini contents format.
@@ -44,11 +45,13 @@ class GeminiProvider(BaseLLMProvider):
         system_text = "\n\n".join(part for part in system_parts if part.strip()) or None
         return contents, system_text
 
-    def _build_body(self, messages: list[ProviderMessage]) -> dict:
+    def _build_body(self, messages: list[ProviderMessage], *, json_mode: bool = False) -> dict:
         contents, system_text = self._build_contents(messages)
         body: dict = {"contents": contents}
         if system_text:
             body["systemInstruction"] = {"parts": [{"text": system_text}]}
+        if json_mode:
+            body["generationConfig"] = {"responseMimeType": "application/json"}
         return body
 
     async def chat(self, messages: list[ProviderMessage]) -> ChatResponse:
@@ -67,6 +70,49 @@ class GeminiProvider(BaseLLMProvider):
         candidate = data["candidates"][0]
         text = candidate["content"]["parts"][0]["text"]
         usage = data.get("usageMetadata")
+
+        return ChatResponse(
+            content=text,
+            model=data.get("modelVersion", self.model),
+            usage=usage,
+        )
+
+    async def chat_json(self, messages: list[ProviderMessage]) -> ChatResponse:
+        if self._json_mode_supported is False:
+            return await self.chat(messages)
+
+        url = f"{self.base_url}/models/{self.model}:generateContent?key={self.api_key}"
+        body = self._build_body(messages, json_mode=True)
+
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                resp = await client.post(
+                    url,
+                    headers={"Content-Type": "application/json"},
+                    json=body,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.HTTPStatusError:
+            status_code = resp.status_code if "resp" in locals() else "unknown"
+            body_text = ""
+            try:
+                body_text = resp.text[:800] if "resp" in locals() else ""
+            except Exception:
+                body_text = ""
+            logger.warning(
+                "Gemini JSON mode not supported, falling back to plain chat (status=%s, body=%s)",
+                status_code,
+                body_text,
+            )
+            if isinstance(status_code, int) and status_code in {400, 404, 415, 422}:
+                self._json_mode_supported = False
+            return await self.chat(messages)
+
+        candidate = data["candidates"][0]
+        text = candidate["content"]["parts"][0]["text"]
+        usage = data.get("usageMetadata")
+        self._json_mode_supported = True
 
         return ChatResponse(
             content=text,

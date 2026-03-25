@@ -39,24 +39,46 @@ class AdminConversationMessageOut(BaseModel):
     created_at: datetime
 
 
+class AdminConversationToolArtifactOut(BaseModel):
+    id: int
+    kind: str
+    label: str | None = None
+    summary: str
+    summary_format: str
+    locator: dict[str, Any] = Field(default_factory=dict)
+    replay: dict[str, Any] | None = None
+    is_primary: bool = True
+    created_at: datetime
+
+
+class AdminConversationToolCallOut(BaseModel):
+    id: int
+    sequence: int
+    call_id: str
+    tool_name: str
+    display_name: str | None = None
+    activity_label: str | None = None
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    output: dict[str, Any] = Field(default_factory=dict)
+    success: bool = True
+    status: str
+    error_text: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    artifacts: list[AdminConversationToolArtifactOut] = Field(default_factory=list)
+    created_at: datetime
+
+
 class AdminConversationRunOut(BaseModel):
     id: int
     assistant_message_id: int | None = None
     status: str
-    event_count: int
-    latest_event_type: str | None = None
+    tool_call_count: int
+    artifact_count: int
     created_at: datetime
     updated_at: datetime
-    events: list["AdminConversationRunEventOut"] = Field(default_factory=list)
-    debug_payload: dict[str, Any] = Field(default_factory=dict)
-
-
-class AdminConversationRunEventOut(BaseModel):
-    id: int
-    sequence: int
-    event_type: str
-    payload: dict[str, Any]
-    created_at: datetime
+    tool_calls: list[AdminConversationToolCallOut] = Field(default_factory=list)
+    snapshot: dict[str, Any] = Field(default_factory=dict)
 
 
 class AdminConversationPdfOut(BaseModel):

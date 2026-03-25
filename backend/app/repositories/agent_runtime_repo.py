@@ -57,10 +57,12 @@ class AgentRuntimeRepository:
         chat_session_id: int,
         snapshot: AgentRuntimeSnapshot,
         *,
+        run_id: int | None = None,
         commit: bool = True,
     ) -> AgentRuntimeSnapshotRecord:
         record = AgentRuntimeSnapshotRecord(
             chat_session_id=chat_session_id,
+            run_id=run_id,
             runtime_name=snapshot.runtime_name,
             runtime_session_id=snapshot.runtime_session_id,
             snapshot_payload=snapshot.model_dump_json(),

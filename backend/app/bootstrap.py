@@ -16,6 +16,8 @@ async def initialize_runtime_environment(*, ensure_db: bool = False) -> None:
             await conn.execute(text("PRAGMA journal_mode=WAL"))
             await conn.run_sync(Base.metadata.create_all)
             await _migrate_legacy_short_term_memory(conn)
+            await _migrate_agent_runtime_snapshots(conn)
+            await _drop_deprecated_tables(conn)
 
     from app.services.content_index import content_index
 
@@ -66,3 +68,37 @@ async def _migrate_legacy_short_term_memory(conn) -> None:  # type: ignore[no-un
     copied = result.rowcount or 0
     if copied > 0:
         logger.info("Copied %d legacy short-term memory rows into %s", copied, current_table)
+
+
+async def _migrate_agent_runtime_snapshots(conn) -> None:  # type: ignore[no-untyped-def]
+    table_names = await conn.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names())
+    table_name = "agent_runtime_snapshots"
+    if table_name not in table_names:
+        return
+
+    columns = await conn.run_sync(
+        lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns(table_name)}
+    )
+    if "run_id" in columns:
+        return
+
+    await conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN run_id INTEGER"))
+    logger.info("Added run_id column to %s", table_name)
+
+
+async def _drop_deprecated_tables(conn) -> None:  # type: ignore[no-untyped-def]
+    deprecated_tables = [
+        "chat_run_events",
+        "chat_run_debug_payloads",
+        "chat_session_states",
+    ]
+    table_names = await conn.run_sync(lambda sync_conn: set(inspect(sync_conn).get_table_names()))
+    dropped: list[str] = []
+    for table_name in deprecated_tables:
+        if table_name not in table_names:
+            continue
+        await conn.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
+        dropped.append(table_name)
+
+    if dropped:
+        logger.info("Dropped deprecated tables: %s", ", ".join(dropped))

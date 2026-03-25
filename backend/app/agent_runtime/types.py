@@ -161,32 +161,70 @@ class AgentTurnInput(BaseModel):
     request_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class ToolRecord(BaseModel):
-    tool: str
-    args: dict[str, Any] = Field(default_factory=dict)
-    result: str = ""
+class ToolArtifact(BaseModel):
+    id: int | None = None
+    kind: str
+    label: str | None = None
+    summary: str
+    summary_format: Literal["text", "markdown", "json"] = "text"
+    body_text: str | None = None
+    body_json: dict[str, Any] | list[Any] | None = None
+    locator: dict[str, Any] = Field(default_factory=dict)
+    replay: dict[str, Any] | None = None
+    search_text: str = ""
+    is_primary: bool = True
+
+
+class ToolCallRecord(BaseModel):
+    tool_name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    call_id: str
+    provider_item_id: str | None = None
+    display_name: str | None = None
+    activity_label: str | None = None
     success: bool = True
-    tool_display_name: str | None = None
-    tool_activity_label: str | None = None
-    tool_call_id: str | None = None
+    status: Literal["requested", "running", "completed", "failed"] = "completed"
+    error_text: str | None = None
+    output: dict[str, Any] = Field(default_factory=dict)
+    artifacts: list[ToolArtifact] = Field(default_factory=list)
+    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    finished_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ToolLoopResult(BaseModel):
+    assistant_text: str
+    turn_summary: str | None = None
+    tool_calls: list[ToolCallRecord] = Field(default_factory=list)
+    usage: dict[str, Any] | None = None
 
 
 class AgentRuntimeSnapshot(BaseModel):
     runtime_name: str
     runtime_session_id: str
     short_term_memory: dict[str, Any] = Field(default_factory=dict)
-    summary: str | None = None
+    turn_summary: str | None = None
     opaque_state: dict[str, Any] = Field(default_factory=dict)
+    provider: dict[str, Any] = Field(default_factory=dict)
+    runtime_link: dict[str, Any] = Field(default_factory=dict)
+    context_sync: dict[str, Any] = Field(default_factory=dict)
+    host_context_state: dict[str, Any] = Field(default_factory=dict)
+    turn_input: dict[str, Any] = Field(default_factory=dict)
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    long_term_memory_writes: list[dict[str, Any]] = Field(default_factory=list)
+    assistant_text: str | None = None
+    usage: dict[str, Any] | None = None
+    status: str | None = None
+    error: dict[str, Any] | None = None
     captured_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class AgentTurnOutput(BaseModel):
     assistant_text: str
+    turn_summary: str | None = None
     events: list[dict[str, Any]] = Field(default_factory=list)
     usage: dict[str, Any] | None = None
-    tool_records: list[ToolRecord] = Field(default_factory=list)
+    tool_calls: list[ToolCallRecord] = Field(default_factory=list)
     snapshot: AgentRuntimeSnapshot | None = None
-    artifacts: dict[str, Any] = Field(default_factory=dict)
     status: str = "completed"
 
 

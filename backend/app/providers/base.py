@@ -34,6 +34,10 @@ class BaseLLMProvider(ABC):
     async def chat(self, messages: list[ProviderMessage]) -> ChatResponse:
         """Send messages and get a complete response."""
 
+    async def chat_json(self, messages: list[ProviderMessage]) -> ChatResponse:
+        """Send messages and prefer a structured JSON response when supported."""
+        return await self.chat(messages)
+
     @abstractmethod
     async def chat_stream(self, messages: list[ProviderMessage]) -> AsyncIterator[str]:
         """Send messages and stream the response token by token."""

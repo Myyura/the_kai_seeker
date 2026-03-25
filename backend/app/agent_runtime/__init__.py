@@ -17,8 +17,9 @@ from app.agent_runtime.types import (
     MemoryPack,
     ResourceHandle,
     SkillDefinition,
+    ToolArtifact,
+    ToolCallRecord,
     ToolDefinition,
-    ToolRecord,
     TurnMessage,
 )
 
@@ -40,8 +41,9 @@ __all__ = [
     "ResourceHandle",
     "SkillDefinition",
     "ShortTermMemoryService",
+    "ToolArtifact",
+    "ToolCallRecord",
     "ToolDefinition",
-    "ToolRecord",
     "TurnMessage",
     "build_base_system_prompt",
     "run_native_agent_loop",

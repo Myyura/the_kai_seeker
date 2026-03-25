@@ -11,7 +11,8 @@ from app.schemas.chat import (
     ChatMessageOut,
     ChatRequest,
     ChatResponseOut,
-    ChatRunEventOut,
+    ChatToolArtifactOut,
+    ChatToolCallOut,
     ChatRunOut,
     ChatSessionDetail,
     ChatSessionOut,
@@ -22,6 +23,15 @@ from app.services.conversation_service import ConversationService
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _loads_json(raw: str | None, fallback):
+    if not raw:
+        return fallback
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return fallback
 
 
 @router.post("/", response_model=ChatResponseOut)
@@ -105,15 +115,40 @@ async def get_session_detail(
                 status=run.status,
                 created_at=run.created_at,
                 updated_at=run.updated_at,
-                events=[
-                    ChatRunEventOut(
-                        id=event.id,
-                        sequence=event.sequence,
-                        event_type=event.event_type,
-                        payload=json.loads(event.payload),
-                        created_at=event.created_at,
+                tool_calls=[
+                    ChatToolCallOut(
+                        id=tool_call.id,
+                        sequence=tool_call.sequence,
+                        call_id=tool_call.call_id,
+                        tool_name=tool_call.tool_name,
+                        display_name=tool_call.display_name,
+                        activity_label=tool_call.activity_label,
+                        arguments=_loads_json(tool_call.arguments_json, {}),
+                        output=_loads_json(tool_call.output_json, {}),
+                        success=tool_call.status != "failed",
+                        status=tool_call.status,
+                        error_text=tool_call.error_text,
+                        started_at=tool_call.started_at,
+                        finished_at=tool_call.finished_at,
+                        artifacts=[
+                            ChatToolArtifactOut(
+                                id=artifact.id,
+                                kind=artifact.kind,
+                                label=artifact.label,
+                                summary=artifact.summary,
+                                summary_format=artifact.summary_format,
+                                locator=_loads_json(artifact.locator_json, {}),
+                                replay=_loads_json(artifact.replay_json, {})
+                                if artifact.replay_json
+                                else None,
+                                is_primary=artifact.is_primary,
+                                created_at=artifact.created_at,
+                            )
+                            for artifact in tool_call.artifacts
+                        ],
+                        created_at=tool_call.created_at,
                     )
-                    for event in run.events
+                    for tool_call in run.tool_calls
                 ],
             )
             for run in chat_session.runs

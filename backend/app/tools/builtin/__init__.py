@@ -4,6 +4,7 @@ from app.tools.builtin.fetch_pdf_and_upload import FetchPdfAndUploadTool
 from app.tools.builtin.lookup_source import LookupSourceTool
 from app.tools.builtin.process_and_summarize_pdf import ProcessAndSummarizePdfTool
 from app.tools.builtin.query_pdf_details import QueryPdfDetailsTool
+from app.tools.builtin.read_artifact import ReadArtifactTool
 from app.tools.builtin.search_questions import SearchQuestionsTool
 from app.tools.builtin.search_schools import SearchSchoolsTool
 from app.tools.builtin.web_fetch import WebFetchTool
@@ -21,3 +22,4 @@ def register_builtin_tools() -> None:
     tool_registry.register(LookupSourceTool())
     tool_registry.register(ProcessAndSummarizePdfTool())
     tool_registry.register(QueryPdfDetailsTool())
+    tool_registry.register(ReadArtifactTool())

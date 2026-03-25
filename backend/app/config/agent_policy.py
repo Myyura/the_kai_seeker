@@ -3,6 +3,42 @@
 from collections.abc import Iterable
 
 
+RESPONSE_FORMAT_POLICY = """
+
+## Response Format
+
+For every model response, return ONLY one valid JSON object.
+
+Use this exact shape when you need a tool:
+{
+  "response_type": "tool_call",
+  "assistant_text": "",
+  "turn_summary": "",
+  "tool_call": {
+    "name": "tool_name",
+    "arguments": {
+      "param1": "value1"
+    }
+  }
+}
+
+Use this exact shape when you are ready to answer the user:
+{
+  "response_type": "final",
+  "assistant_text": "your full user-facing answer",
+  "turn_summary": "a short plain-text summary of the answer for runtime memory",
+  "tool_call": null
+}
+
+Important rules:
+- Return ONLY JSON. No markdown fences. No prose outside the JSON object.
+- `turn_summary` is internal runtime metadata. Keep it plain text, concise, and factual.
+- If `response_type` is `tool_call`, leave `assistant_text` and `turn_summary` empty.
+- If `response_type` is `final`, `assistant_text` must contain the full answer and `turn_summary` must be non-empty.
+- Previous tool results may appear in the conversation as JSON user messages with a `tool_output` field.
+"""
+
+
 TOOL_USAGE_POLICY = """
 
 ## Available Tools
@@ -12,17 +48,11 @@ You have access to the following tools. **You should actively use tools** whenev
 - Fetching official school/program/exam information from URLs
 - Any task where accurate, up-to-date information is needed rather than relying on your training data
 
-To use a tool, respond ONLY with a tool_call block (no other text before it):
-
-<tool_call>
-{{"name": "tool_name", "arguments": {{"param1": "value1"}}}}
-</tool_call>
-
 Important rules:
-- Output ONLY the <tool_call> block when you want to use a tool, with no extra text
+- When you want to use a tool, respond with the JSON `response_type="tool_call"` format
 - You may call ONE tool per response
-- After you receive the result in <tool_result>, you can call another tool or give your final answer
-- When you have enough information, respond with your final answer as normal text (no tool_call block)
+- After you receive a `tool_output`, you can call another tool or give your final answer
+- When you have enough information, respond with the JSON `response_type="final"` format
 - If the user explicitly asks you to fetch a URL or use a specific tool, you MUST use it
 - NEVER invent, guess, or handcraft new URLs based on patterns such as /admission, /exam, /guide, /index, or filename guesses
 - When navigating a website, only fetch:
@@ -62,3 +92,8 @@ def build_tool_policy(tool_schemas: Iterable[dict]) -> str:
 
     tool_list = "\n".join(tool_descriptions)
     return TOOL_USAGE_POLICY.format(tool_list=tool_list)
+
+
+def build_response_format_policy() -> str:
+    """Build the stable JSON response contract used by the native runtime."""
+    return RESPONSE_FORMAT_POLICY.strip()

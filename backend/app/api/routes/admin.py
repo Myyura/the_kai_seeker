@@ -16,7 +16,8 @@ from app.schemas.admin import (
     AdminConversationMessageOut,
     AdminConversationPdfOut,
     AdminConversationRuntimeSnapshotOut,
-    AdminConversationRunEventOut,
+    AdminConversationToolArtifactOut,
+    AdminConversationToolCallOut,
     AdminConversationRunOut,
     AdminPdfChunksOut,
     AdminPdfDetailOut,
@@ -91,6 +92,15 @@ def _parse_json_payload(raw: str | None) -> dict:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _parse_json_any(raw: str | None):
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+
+
 def _parse_json_list(raw: str | None) -> list:
     if not raw:
         return []
@@ -153,21 +163,50 @@ async def get_admin_conversation_detail(
                 id=run.id,
                 assistant_message_id=run.assistant_message_id,
                 status=run.status,
-                event_count=len(run.events),
-                latest_event_type=run.events[-1].event_type if run.events else None,
+                tool_call_count=len(run.tool_calls),
+                artifact_count=sum(len(tool_call.artifacts) for tool_call in run.tool_calls),
                 created_at=run.created_at,
                 updated_at=run.updated_at,
-                events=[
-                    AdminConversationRunEventOut(
-                        id=event.id,
-                        sequence=event.sequence,
-                        event_type=event.event_type,
-                        payload=json.loads(event.payload),
-                        created_at=event.created_at,
+                tool_calls=[
+                    AdminConversationToolCallOut(
+                        id=tool_call.id,
+                        sequence=tool_call.sequence,
+                        call_id=tool_call.call_id,
+                        tool_name=tool_call.tool_name,
+                        display_name=tool_call.display_name,
+                        activity_label=tool_call.activity_label,
+                        arguments=_parse_json_payload(tool_call.arguments_json),
+                        output=_parse_json_payload(tool_call.output_json),
+                        success=tool_call.status != "failed",
+                        status=tool_call.status,
+                        error_text=tool_call.error_text,
+                        started_at=tool_call.started_at,
+                        finished_at=tool_call.finished_at,
+                        artifacts=[
+                            AdminConversationToolArtifactOut(
+                                id=artifact.id,
+                                kind=artifact.kind,
+                                label=artifact.label,
+                                summary=artifact.summary,
+                                summary_format=artifact.summary_format,
+                                locator=_parse_json_payload(artifact.locator_json),
+                                replay=_parse_json_payload(artifact.replay_json)
+                                if artifact.replay_json
+                                else None,
+                                is_primary=artifact.is_primary,
+                                created_at=artifact.created_at,
+                            )
+                            for artifact in tool_call.artifacts
+                        ],
+                        created_at=tool_call.created_at,
                     )
-                    for event in run.events
+                    for tool_call in run.tool_calls
                 ],
-                debug_payload=_parse_json_payload(run.debug_payload.payload if run.debug_payload else None),
+                snapshot=(
+                    _parse_json_payload(run.runtime_snapshots[-1].snapshot_payload)
+                    if run.runtime_snapshots
+                    else {}
+                ),
             )
             for run in chat_session.runs
         ],
@@ -188,7 +227,7 @@ async def get_admin_conversation_detail(
             AdminConversationRuntimeSnapshotOut(
                 id=snapshot.id,
                 created_at=snapshot.created_at,
-                payload=_parse_json_payload(snapshot.snapshot_payload),
+                payload=_parse_json_any(snapshot.snapshot_payload),
             )
             for snapshot in chat_session.runtime_snapshots
         ],

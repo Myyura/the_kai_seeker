@@ -56,11 +56,33 @@ class ChatSessionPdfResourceOut(BaseModel):
     source_url: str | None = None
 
 
-class ChatRunEventOut(BaseModel):
+class ChatToolArtifactOut(BaseModel):
+    id: int
+    kind: str
+    label: str | None = None
+    summary: str
+    summary_format: str
+    locator: dict[str, Any] = Field(default_factory=dict)
+    replay: dict[str, Any] | None = None
+    is_primary: bool = True
+    created_at: datetime
+
+
+class ChatToolCallOut(BaseModel):
     id: int
     sequence: int
-    event_type: str
-    payload: dict[str, Any]
+    call_id: str
+    tool_name: str
+    display_name: str | None = None
+    activity_label: str | None = None
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    output: dict[str, Any] = Field(default_factory=dict)
+    success: bool = True
+    status: str
+    error_text: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    artifacts: list[ChatToolArtifactOut] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -70,7 +92,7 @@ class ChatRunOut(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
-    events: list[ChatRunEventOut] = Field(default_factory=list)
+    tool_calls: list[ChatToolCallOut] = Field(default_factory=list)
 
 
 ChatSessionDetail.model_rebuild()
